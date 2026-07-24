@@ -42,6 +42,7 @@ class MainViewModel(
         backgroundReconnectEnabled = settingsRepositoryImpl?.isBackgroundReconnectEnabled() ?: false,
         backgroundActivityFullTextEnabled = settingsRepositoryImpl?.isBackgroundActivityFullTextEnabled() ?: false,
         reconnectPollIntervalSeconds = settingsRepositoryImpl?.getReconnectPollIntervalSeconds() ?: 1,
+        requireVpnForTailscaleEnabled = settingsRepositoryImpl?.isRequireVpnForTailscaleEnabled() ?: false,
         sseTransportEnabled = settingsRepositoryImpl?.isSseTransportEnabled() ?: false,
         debugLoggingEnabled = settingsRepositoryImpl?.isDebugLoggingEnabled() ?: false,
         blockScreenshotsEnabled = settingsRepositoryImpl?.isBlockScreenshotsEnabled() ?: false,
@@ -409,6 +410,11 @@ class MainViewModel(
         _uiState.update { it.copy(reconnectPollIntervalSeconds = clamped) }
     }
 
+    fun setRequireVpnForTailscaleEnabled(enabled: Boolean) {
+        settingsRepositoryImpl?.setRequireVpnForTailscaleEnabled(enabled)
+        _uiState.update { it.copy(requireVpnForTailscaleEnabled = enabled) }
+    }
+
     fun setDebugLoggingEnabled(enabled: Boolean) {
         settingsRepositoryImpl?.setDebugLoggingEnabled(enabled)
         _uiState.update { it.copy(debugLoggingEnabled = enabled) }
@@ -495,6 +501,7 @@ class MainViewModel(
                 backgroundReconnectEnabled = repo.isBackgroundReconnectEnabled(),
                 backgroundActivityFullTextEnabled = repo.isBackgroundActivityFullTextEnabled(),
                 reconnectPollIntervalSeconds = repo.getReconnectPollIntervalSeconds(),
+                requireVpnForTailscaleEnabled = repo.isRequireVpnForTailscaleEnabled(),
                 sseTransportEnabled = repo.isSseTransportEnabled(),
                 debugLoggingEnabled = repo.isDebugLoggingEnabled(),
                 blockScreenshotsEnabled = repo.isBlockScreenshotsEnabled(),

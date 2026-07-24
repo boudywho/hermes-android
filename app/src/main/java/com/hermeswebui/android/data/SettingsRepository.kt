@@ -30,7 +30,7 @@ class SettingsRepository(context: Context) : SettingsStore {
 
     private fun runMigration() {
         val lastMigrationVersion = sharedPreferences.getInt(KEY_LAST_MIGRATION_VERSION, 0)
-        val currentMigrationVersion = 9 // Increment this when adding new migrations
+        val currentMigrationVersion = 10 // Increment this when adding new migrations
 
         if (lastMigrationVersion < 1) {
             // Migration 1: Clear dashboard URLs from pre-0.1.5 versions
@@ -97,6 +97,13 @@ class SettingsRepository(context: Context) : SettingsStore {
             // Migration 9: automatic app update checks default to enabled, with daily throttling.
             if (!sharedPreferences.contains(KEY_AUTOMATIC_APP_UPDATE_CHECKS_ENABLED)) {
                 sharedPreferences.edit { putBoolean(KEY_AUTOMATIC_APP_UPDATE_CHECKS_ENABLED, true) }
+            }
+        }
+
+        if (lastMigrationVersion < 10) {
+            // Migration 10: VPN/Tailscale guard defaults to opt-in (disabled).
+            if (!sharedPreferences.contains(KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED)) {
+                sharedPreferences.edit { putBoolean(KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED, false) }
             }
         }
 
@@ -174,6 +181,14 @@ class SettingsRepository(context: Context) : SettingsStore {
         sharedPreferences.edit { putInt(KEY_RECONNECT_POLL_INTERVAL_SECONDS, clamped) }
     }
 
+    fun isRequireVpnForTailscaleEnabled(): Boolean {
+        return sharedPreferences.getBoolean(KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED, false)
+    }
+
+    fun setRequireVpnForTailscaleEnabled(enabled: Boolean) {
+        sharedPreferences.edit { putBoolean(KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED, enabled) }
+    }
+
     fun isDebugLoggingEnabled(): Boolean {
         return sharedPreferences.getBoolean(KEY_DEBUG_LOGGING_ENABLED, false)
     }
@@ -241,6 +256,30 @@ class SettingsRepository(context: Context) : SettingsStore {
 
     fun markAppUpdateNotified(version: String) {
         sharedPreferences.edit { putString(KEY_APP_UPDATE_LAST_NOTIFIED_VERSION, version) }
+    }
+
+    fun markPendingGitHubUpdateDownload(downloadId: Long) {
+        sharedPreferences.edit { putLong(KEY_PENDING_GITHUB_UPDATE_DOWNLOAD_ID, downloadId) }
+    }
+
+    fun pendingGitHubUpdateDownloadId(): Long {
+        return sharedPreferences.getLong(KEY_PENDING_GITHUB_UPDATE_DOWNLOAD_ID, -1L)
+    }
+
+    fun clearPendingGitHubUpdateDownload() {
+        sharedPreferences.edit { remove(KEY_PENDING_GITHUB_UPDATE_DOWNLOAD_ID) }
+    }
+
+    fun markPendingGitHubUpdateCleanupDownload(downloadId: Long) {
+        sharedPreferences.edit { putLong(KEY_PENDING_GITHUB_UPDATE_CLEANUP_DOWNLOAD_ID, downloadId) }
+    }
+
+    fun pendingGitHubUpdateCleanupDownloadId(): Long {
+        return sharedPreferences.getLong(KEY_PENDING_GITHUB_UPDATE_CLEANUP_DOWNLOAD_ID, -1L)
+    }
+
+    fun clearPendingGitHubUpdateCleanupDownload() {
+        sharedPreferences.edit { remove(KEY_PENDING_GITHUB_UPDATE_CLEANUP_DOWNLOAD_ID) }
     }
 
     /**
@@ -391,6 +430,7 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val KEY_NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
         private const val KEY_BACKGROUND_RECONNECT_ENABLED = "background_reconnect_enabled"
         private const val KEY_RECONNECT_POLL_INTERVAL_SECONDS = "reconnect_poll_interval_seconds"
+        private const val KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED = "require_vpn_for_tailscale_enabled"
         private const val KEY_DEBUG_LOGGING_ENABLED = "debug_logging_enabled"
         private const val KEY_SSE_TRANSPORT_ENABLED = "sse_transport_enabled"
         private const val KEY_BLOCK_SCREENSHOTS_ENABLED = "block_screenshots_enabled"
@@ -399,6 +439,8 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val KEY_AUTOMATIC_APP_UPDATE_CHECKS_ENABLED = "automatic_app_update_checks_enabled"
         private const val KEY_APP_UPDATE_LAST_CHECK_MS = "app_update_last_check_ms"
         private const val KEY_APP_UPDATE_LAST_NOTIFIED_VERSION = "app_update_last_notified_version"
+        private const val KEY_PENDING_GITHUB_UPDATE_DOWNLOAD_ID = "pending_github_update_download_id"
+        private const val KEY_PENDING_GITHUB_UPDATE_CLEANUP_DOWNLOAD_ID = "pending_github_update_cleanup_download_id"
         private const val KEY_AUTH_PROMPT_SILENCED_URLS = "auth_prompt_silenced_urls"
         private const val KEY_LAST_MIGRATION_VERSION = "last_migration_version"
         private const val DEFAULT_RECONNECT_POLL_INTERVAL_SECONDS = 1

@@ -3,7 +3,7 @@
 > Maintenance-focused Android wrapper for Hermes Web UI. The core wrapper is
 > good as-is; product UI and workflow changes belong in Hermes WebUI.
 >
-> Last updated: 2026-07-21
+> Last updated: 2026-07-24
 
 ---
 
@@ -221,4 +221,5 @@ sketches are captured inline below.
 | BUG-027 | 2026-07-13 | WebView | Fixed Issue 44 by re-capping the expanded mobile approval panel's `max-height: min(60dvh, 420px)` with a measured pixel height on narrow Android WebView viewports, restoring the approval details and action buttons while preserving the intentional collapsed header-only dock |
 | BUG-028 | 2026-07-20 | Permissions | Fixed Issue 49 regression on OEM Android 16 builds where `ACCESS_LOCAL_NETWORK` requests can deny without exposing a user-togglable grant path: LAN startup/save/switch flows now treat the permission prompt as best-effort and still attempt the first WebView load, while the existing `ERR_LOCAL_NETWORK_PERMISSION_MISSING` recovery path remains the enforcement fallback for platforms that do require the grant |
 | BUG-029 | 2026-07-22 | WebView | Replaced the whack-a-mole viewport fix approach (20+ explicit CSS selectors) with a hybrid viewport polyfill using generic collapse detection: injects CSS custom properties (`--vh`, `--dvh`) with measured pixel values, applies baseline CSS for root/layout containers, and automatically finds/repairs ANY element collapsed by the Android WebView vh=0 bug using heuristics (tiny height + large scrollHeight + interactive content). Includes performance guards (MAX_REPAIRS=50, MIN_INTERVAL=100ms) and automatic cleanup when elements recover. Eliminates future Issue 6/44/53-style sliver UI regressions without needing new selectors |
-
+| BUG-030 | 2026-07-24 | Settings / Connectivity | Added an opt-in VPN startup guard for Tailscale-addressed Hermes servers: when enabled, startup/save/switch loads for `*.ts.net` and Tailscale CGNAT/ULA endpoints require an active Android VPN transport, and the app attempts to open Tailscale (or VPN settings) before showing inline recovery guidance |
+| BUG-031 | 2026-07-24 | Updates | Improved channel-specific update UX to avoid website/store-page detours: GitHub channel notifications now start direct APK download, prompt Android installer after completion, and clean up staged APKs after installer handoff; Play channel keeps using Google Play Core immediate in-app update flow |

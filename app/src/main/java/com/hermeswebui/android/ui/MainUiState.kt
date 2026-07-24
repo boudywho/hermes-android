@@ -25,6 +25,7 @@ data class MainUiState(
     val backgroundReconnectEnabled: Boolean = false,
     val backgroundActivityFullTextEnabled: Boolean = false,
     val reconnectPollIntervalSeconds: Int = 1,
+    val requireVpnForTailscaleEnabled: Boolean = false,
     val sseTransportEnabled: Boolean = false,
     val sseSupportStatus: String? = null,
     val debugLoggingEnabled: Boolean = false,

@@ -9,8 +9,10 @@ import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -19,6 +21,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Message
+import android.os.SystemClock
+import android.provider.Settings
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
@@ -97,6 +101,7 @@ import com.hermeswebui.android.notification.HermesNotificationPresenter
 import com.hermeswebui.android.domain.ServerUrlValidator
 import com.hermeswebui.android.server.HermesServerProfileCoordinator
 import com.hermeswebui.android.domain.ShareIntentParser
+import com.hermeswebui.android.domain.TailscaleEndpointDetector
 import com.hermeswebui.android.ui.MainViewModel
 import com.hermeswebui.android.ui.MainViewModelFactory
 import com.hermeswebui.android.ui.DebugLogFloatingOverlay
@@ -117,6 +122,7 @@ private const val HermesNotificationChannelId = "hermes_webui_notifications"
 private const val HermesNotificationIdBase = 10_000
 private const val HermesGithubIssuesListUrl = "https://github.com/hermes-webui/hermes-android/issues"
 private const val HermesGithubNewIssueUrl = "https://github.com/hermes-webui/hermes-android/issues/new/choose"
+private const val TailscaleAndroidPackage = "com.tailscale.ipn"
 private const val EnableAppSettingsSidebarShim = true
 
 private val HermesDarkColorScheme = darkColorScheme(
@@ -174,6 +180,7 @@ class MainActivity : ComponentActivity() {
     private var routeRecoveryScriptHandler: ScriptHandler? = null
     private var appSettingsEntryScriptHandler: ScriptHandler? = null
     private var enterKeyNewlineScriptHandler: ScriptHandler? = null
+    private var lastVpnLaunchAttemptElapsedMs: Long = 0L
     private var activityVisible = false
     private lateinit var appUpdateManager: AppUpdateManager
     private lateinit var appUpdateCoordinator: HermesAppUpdateCoordinator
@@ -181,6 +188,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var notificationPresenter: HermesNotificationPresenter
     private lateinit var serverProfileCoordinator: HermesServerProfileCoordinator
     private lateinit var foregroundServiceCoordinator: HermesForegroundServiceCoordinator
+    private val appUpdateDownloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            val downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            appUpdateCoordinator.onDownloadComplete(downloadId)
+        }
+    }
 
     private var activeOAuthPopup: WebView? = null
     private var activeOAuthFlow: OAuthPopupFlow? = null
@@ -325,6 +339,13 @@ class MainActivity : ComponentActivity() {
             isActivityVisible = { activityVisible },
             appVersionName = ::appVersionName
         )
+        appUpdateCoordinator.cleanupInstalledGitHubUpdateArtifact()
+        ContextCompat.registerReceiver(
+            this,
+            appUpdateDownloadReceiver,
+            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         serverProfileCoordinator = HermesServerProfileCoordinator(
             context = this,
             activityScope = lifecycleScope,
@@ -441,6 +462,11 @@ class MainActivity : ComponentActivity() {
         cleanupExpiredOAuthPopup()
     }
 
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(appUpdateDownloadReceiver) }
+        super.onDestroy()
+    }
+
     /** Handles Hermes app deep links.
      *
      * hermes://app/settings opens native Android settings. hermes://session/{id}
@@ -470,7 +496,7 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "Session URL is not allowlisted", Toast.LENGTH_LONG).show()
             return true
         }
-        webView.loadUrl(sessionUrl)
+        loadServerUrlWithVpnGuard(sessionUrl)
         return true
     }
 
@@ -604,6 +630,7 @@ class MainActivity : ComponentActivity() {
                     backgroundReconnectEnabled = uiState.backgroundReconnectEnabled,
                     backgroundActivityFullTextEnabled = uiState.backgroundActivityFullTextEnabled,
                     reconnectPollIntervalSeconds = uiState.reconnectPollIntervalSeconds,
+                    requireVpnForTailscaleEnabled = uiState.requireVpnForTailscaleEnabled,
                     sseTransportEnabled = uiState.sseTransportEnabled,
                     sseSupportStatus = uiState.sseSupportStatus,
                     debugLoggingEnabled = uiState.debugLoggingEnabled,
@@ -636,6 +663,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onSetReconnectPollIntervalSeconds = { seconds ->
                         viewModel.setReconnectPollIntervalSeconds(seconds)
+                    },
+                    onSetRequireVpnForTailscaleEnabled = { enabled ->
+                        viewModel.setRequireVpnForTailscaleEnabled(enabled)
                     },
                     onSetSseTransportEnabled = { enabled ->
                         setSseTransportEnabled(enabled)
@@ -839,7 +869,7 @@ class MainActivity : ComponentActivity() {
                         requestLocalNetworkPermissionIfNeeded(
                             url = failedUrl,
                             onGranted = {
-                                webView.loadUrl(failedUrl)
+                                loadServerUrlWithVpnGuard(failedUrl)
                             }
                         )
                         return
@@ -1612,10 +1642,10 @@ class MainActivity : ComponentActivity() {
             requestLocalNetworkPermissionIfNeeded(
                 url = serverUrl,
                 onGranted = {
-                    webView.loadUrl(serverUrl)
+                    loadServerUrlWithVpnGuard(serverUrl)
                 },
                 onDenied = {
-                    webView.loadUrl(serverUrl)
+                    loadServerUrlWithVpnGuard(serverUrl)
                 }
             )
         }
@@ -1649,7 +1679,7 @@ class MainActivity : ComponentActivity() {
         // Also drop stored HTTP Basic/Digest credentials — otherwise a "reset web session"
         // (sign out & wipe) still leaves saved auth behind on a shared device.
         runCatching { WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword() }
-        webView.loadUrl(viewModel.uiState.value.settings.serverUrl)
+        loadServerUrlWithVpnGuard(viewModel.uiState.value.settings.serverUrl)
     }
 
     private fun preflightConfiguredStartupServer(serverUrl: String) {
@@ -1667,10 +1697,10 @@ class MainActivity : ComponentActivity() {
                 requestLocalNetworkPermissionIfNeeded(
                     url = targetUrl,
                     onGranted = {
-                        webView.loadUrl(targetUrl)
+                        loadServerUrlWithVpnGuard(targetUrl)
                     },
                     onDenied = {
-                        webView.loadUrl(targetUrl)
+                        loadServerUrlWithVpnGuard(targetUrl)
                     }
                 )
             }
@@ -1758,10 +1788,10 @@ class MainActivity : ComponentActivity() {
         requestLocalNetworkPermissionIfNeeded(
             url = profile.url,
             onGranted = {
-                webView.loadUrl(profile.url)
+                loadServerUrlWithVpnGuard(profile.url)
             },
             onDenied = {
-                webView.loadUrl(profile.url)
+                loadServerUrlWithVpnGuard(profile.url)
             }
         )
         viewModel.closeSettings()
@@ -1865,6 +1895,58 @@ class MainActivity : ComponentActivity() {
         val network = manager.activeNetwork ?: return false
         val caps = manager.getNetworkCapabilities(network) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun loadServerUrlWithVpnGuard(url: String) {
+        if (!shouldRequireVpnForServerUrl(url) || isVpnTransportActive()) {
+            webView.loadUrl(url)
+            return
+        }
+
+        maybeLaunchVpnForServer(url)
+        viewModel.openSettingsWithServerValidation(
+            message = "VPN is required before connecting to this Tailscale Hermes server.",
+            isError = true,
+            details = "Start Tailscale (or another VPN) and try again."
+        )
+    }
+
+    private fun shouldRequireVpnForServerUrl(url: String): Boolean {
+        return viewModel.uiState.value.requireVpnForTailscaleEnabled &&
+            TailscaleEndpointDetector.isTailscaleUrl(url)
+    }
+
+    private fun isVpnTransportActive(): Boolean {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return false
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun maybeLaunchVpnForServer(url: String) {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - lastVpnLaunchAttemptElapsedMs < 5_000L) return
+        lastVpnLaunchAttemptElapsedMs = nowElapsed
+
+        val launchedTailscale = if (TailscaleEndpointDetector.isTailscaleUrl(url)) {
+            val tailscaleIntent = packageManager.getLaunchIntentForPackage(TailscaleAndroidPackage)
+            if (tailscaleIntent != null) {
+                startActivity(tailscaleIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+
+        if (!launchedTailscale) {
+            val vpnIntent = Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { startActivity(vpnIntent) }
+        }
+
+        Toast.makeText(this, "Start VPN/Tailscale, then reconnect Hermes.", Toast.LENGTH_LONG).show()
     }
 
     private fun rememberActiveOAuthPopup(popup: WebView, flow: OAuthPopupFlow) {

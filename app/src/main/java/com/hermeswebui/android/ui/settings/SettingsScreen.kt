@@ -69,6 +69,7 @@ fun SettingsScreen(
     backgroundReconnectEnabled: Boolean,
     backgroundActivityFullTextEnabled: Boolean,
     reconnectPollIntervalSeconds: Int,
+    requireVpnForTailscaleEnabled: Boolean,
     sseTransportEnabled: Boolean,
     sseSupportStatus: String?,
     debugLoggingEnabled: Boolean,
@@ -89,6 +90,7 @@ fun SettingsScreen(
     onSetBackgroundReconnect: (Boolean) -> Unit,
     onSetBackgroundActivityFullTextEnabled: (Boolean) -> Unit,
     onSetReconnectPollIntervalSeconds: (Int) -> Unit,
+    onSetRequireVpnForTailscaleEnabled: (Boolean) -> Unit,
     onSetSseTransportEnabled: (Boolean) -> Unit,
     onCheckSseSupport: () -> Unit,
     onCopySsePrompt: () -> Unit,
@@ -487,6 +489,41 @@ fun SettingsScreen(
                         ListItem(
                             headlineContent = {
                                 Text(
+                                    "Require VPN for Tailscale servers",
+                                    color = onSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    "When the server URL looks like Tailscale (.ts.net or 100.64.0.0/10), Hermes only connects while a VPN is active and will try opening Tailscale/VPN settings first.",
+                                    color = onSurfaceVar,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            trailingContent = {
+                                Switch(
+                                    checked = requireVpnForTailscaleEnabled,
+                                    onCheckedChange = onSetRequireVpnForTailscaleEnabled,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = primaryColor,
+                                        uncheckedThumbColor = onSurfaceVar,
+                                        uncheckedTrackColor = surfaceVariant
+                                    )
+                                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                            modifier = Modifier.clickable {
+                                onSetRequireVpnForTailscaleEnabled(!requireVpnForTailscaleEnabled)
+                            }
+                        )
+
+                        HorizontalDivider(color = outlineVar.copy(alpha = 0.5f))
+
+                        ListItem(
+                            headlineContent = {
+                                Text(
                                     "App update alerts",
                                     color = onSurface,
                                     fontWeight = FontWeight.Medium
@@ -595,7 +632,7 @@ fun SettingsScreen(
                                                 contentColor = MaterialTheme.colorScheme.onPrimary
                                             )
                                         ) {
-                                            Text("Download APK")
+                                            Text("Download / Install APK")
                                         }
                                     }
                                     if (!appUpdateReleaseUrl.isNullOrBlank()) {
