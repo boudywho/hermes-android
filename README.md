@@ -161,8 +161,8 @@ Hermes-Android currently publishes through two release channels:
 
 Current checked-in release metadata:
 
-- Version name: `1.0.3`
-- Version code: `10003`
+- Version name: `1.0.4`
+- Version code: `10004`
 - Play application ID: `com.hermeswebui.android`
 - GitHub application ID: `com.hermeswebui.android.github`
 - Compile SDK / target SDK: `37`
