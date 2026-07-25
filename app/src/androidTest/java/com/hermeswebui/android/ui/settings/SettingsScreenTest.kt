@@ -38,6 +38,7 @@ class SettingsScreenTest {
                 appUpdateStatus = null,
                 appUpdateReleaseUrl = null,
                 appUpdateDownloadUrl = null,
+                appUpdateInstallReady = false,
                 appUpdateReleaseNotes = null,
                 serverValidation = ServerValidationUiState(
                     isChecking = false,
@@ -101,6 +102,7 @@ class SettingsScreenTest {
                 appUpdateStatus = null,
                 appUpdateReleaseUrl = null,
                 appUpdateDownloadUrl = null,
+                appUpdateInstallReady = false,
                 appUpdateReleaseNotes = null,
                 serverValidation = ServerValidationUiState(
                     isChecking = true,
@@ -165,6 +167,7 @@ class SettingsScreenTest {
                 appUpdateStatus = null,
                 appUpdateReleaseUrl = null,
                 appUpdateDownloadUrl = null,
+                appUpdateInstallReady = false,
                 appUpdateReleaseNotes = null,
                 serverValidation = ServerValidationUiState(),
                 appVersionLabel = "Version 0.0.0",

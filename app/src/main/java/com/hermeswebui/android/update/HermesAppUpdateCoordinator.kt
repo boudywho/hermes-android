@@ -28,6 +28,7 @@ import com.google.android.play.core.install.model.UpdateAvailability
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class HermesAppUpdateCoordinator(
@@ -57,9 +58,11 @@ class HermesAppUpdateCoordinator(
         private const val APP_UPDATE_NOTIFICATION_ID = 7_001
         private const val APP_UPDATE_INSTALL_READY_NOTIFICATION_ID = 7_002
         private const val AUTOMATIC_APP_UPDATE_CHECK_DELAY_MS = 60_000L
+        private const val GITHUB_DOWNLOAD_MONITOR_INTERVAL_MS = 5_000L
     }
 
     private var automaticAppUpdateCheckJob: Job? = null
+    private var githubDownloadMonitorJob: Job? = null
 
     fun appUpdateChannelLabel(): String {
         return when (updateChannel) {
@@ -86,6 +89,28 @@ class HermesAppUpdateCoordinator(
     fun cancelAutomaticAppUpdateCheck() {
         automaticAppUpdateCheckJob?.cancel()
         automaticAppUpdateCheckJob = null
+    }
+
+    fun startPendingGitHubDownloadMonitor() {
+        if (githubDownloadMonitorJob?.isActive == true) return
+        githubDownloadMonitorJob = activityScope.launch {
+            while (isActive) {
+                if (!isActivityVisible()) {
+                    githubDownloadMonitorJob = null
+                    return@launch
+                }
+                if (!checkPendingGitHubDownloadForInstall()) {
+                    githubDownloadMonitorJob = null
+                    return@launch
+                }
+                delay(GITHUB_DOWNLOAD_MONITOR_INTERVAL_MS)
+            }
+        }
+    }
+
+    fun stopPendingGitHubDownloadMonitor() {
+        githubDownloadMonitorJob?.cancel()
+        githubDownloadMonitorJob = null
     }
 
     fun checkForAppUpdates(force: Boolean) {
@@ -122,6 +147,7 @@ class HermesAppUpdateCoordinator(
             ACTION_INSTALL_DOWNLOADED_APP_UPDATE -> {
                 val downloadId = intent.getLongExtra(EXTRA_APP_UPDATE_DOWNLOAD_ID, -1L)
                 NotificationManagerCompat.from(context).cancel(APP_UPDATE_INSTALL_READY_NOTIFICATION_ID)
+                viewModel.setAppUpdateInstallReady(false)
                 promptInstallDownloadedGithubUpdate(downloadId)
                 true
             }
@@ -133,9 +159,11 @@ class HermesAppUpdateCoordinator(
     fun downloadAvailableGitHubUpdate() {
         val pendingDownloadId = settingsRepository.pendingGitHubUpdateDownloadId()
         if (pendingDownloadId > 0L) {
+            viewModel.setAppUpdateInstallReady(true)
             promptInstallDownloadedGithubUpdate(pendingDownloadId)
             return
         }
+        viewModel.setAppUpdateInstallReady(false)
         val state = viewModel.uiState.value
         downloadGitHubUpdate(state.appUpdateDownloadUrl, state.appUpdateFileName)
     }
@@ -156,8 +184,66 @@ class HermesAppUpdateCoordinator(
         if (isActivityVisible()) {
             promptInstallDownloadedGithubUpdate(downloadId)
         } else {
+            viewModel.setAppUpdateInstallReady(true)
             showInstallReadyNotification(downloadId)
         }
+    }
+
+    fun resumePendingGitHubInstallIfReady() {
+        val hasPendingDownload = settingsRepository.pendingGitHubUpdateDownloadId() > 0L
+        viewModel.setAppUpdateInstallReady(hasPendingDownload)
+        startPendingGitHubDownloadMonitor()
+    }
+
+    private fun checkPendingGitHubDownloadForInstall(): Boolean {
+        val pendingId = settingsRepository.pendingGitHubUpdateDownloadId()
+        if (pendingId <= 0L) {
+            viewModel.setAppUpdateInstallReady(false)
+            return false
+        }
+        val manager = context.getSystemService(DownloadManager::class.java)
+        val query = DownloadManager.Query().setFilterById(pendingId)
+        val cursor = manager.query(query)
+        cursor.use {
+            if (!it.moveToFirst()) {
+                settingsRepository.clearPendingGitHubUpdateDownload()
+                viewModel.setAppUpdateInstallReady(false)
+                return false
+            }
+            val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+            when (status) {
+                DownloadManager.STATUS_SUCCESSFUL -> {
+                    if (!canRequestUnknownAppInstalls()) {
+                        viewModel.setAppUpdateInstallReady(true)
+                        return false
+                    }
+                    val apkUri = manager.getUriForDownloadedFile(pendingId) ?: run {
+                        settingsRepository.clearPendingGitHubUpdateDownload()
+                        viewModel.setAppUpdateInstallReady(false)
+                        return false
+                    }
+                    launchPackageInstaller(pendingId, apkUri)
+                    viewModel.setAppUpdateInstallReady(false)
+                    return false
+                }
+                DownloadManager.STATUS_FAILED -> {
+                    settingsRepository.clearPendingGitHubUpdateDownload()
+                    viewModel.setAppUpdateInstallReady(false)
+                    return false
+                }
+                DownloadManager.STATUS_PENDING,
+                DownloadManager.STATUS_RUNNING,
+                DownloadManager.STATUS_PAUSED -> {
+                    viewModel.setAppUpdateInstallReady(false)
+                    return true
+                }
+                else -> {
+                    viewModel.setAppUpdateInstallReady(false)
+                    return false
+                }
+            }
+        }
+        return false
     }
 
     fun cleanupInstalledGitHubUpdateArtifact() {
@@ -302,6 +388,8 @@ class HermesAppUpdateCoordinator(
             Toast.makeText(context, "No GitHub APK download is available", Toast.LENGTH_LONG).show()
             return
         }
+        viewModel.setAppUpdateInstallReady(false)
+        promptUnknownAppInstallPermissionForUpcomingUpdateInstall()
         val parsed = Uri.parse(url)
 
         val safeFileName = fileName
@@ -322,11 +410,27 @@ class HermesAppUpdateCoordinator(
         }
         val downloadId = context.getSystemService(DownloadManager::class.java).enqueue(request)
         settingsRepository.markPendingGitHubUpdateDownload(downloadId)
+        startPendingGitHubDownloadMonitor()
         Toast.makeText(context, "GitHub APK download started", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun promptUnknownAppInstallPermissionForUpcomingUpdateInstall() {
+        if (canRequestUnknownAppInstalls()) return
+        val settingsIntent = Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Uri.parse("package:${context.packageName}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(settingsIntent) }
+        Toast.makeText(
+            context,
+            "Allow installs from Hermes WebUI while the APK downloads.",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     private fun promptInstallDownloadedGithubUpdate(downloadId: Long) {
         if (downloadId <= 0L) {
+            viewModel.setAppUpdateInstallReady(false)
             Toast.makeText(context, "No downloaded update is ready to install", Toast.LENGTH_SHORT).show()
             return
         }
@@ -336,6 +440,7 @@ class HermesAppUpdateCoordinator(
         cursor.use {
             if (!it.moveToFirst()) {
                 settingsRepository.clearPendingGitHubUpdateDownload()
+                viewModel.setAppUpdateInstallReady(false)
                 Toast.makeText(context, "Downloaded update is no longer available", Toast.LENGTH_SHORT).show()
                 return
             }
@@ -343,9 +448,11 @@ class HermesAppUpdateCoordinator(
             val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
             when (status) {
                 DownloadManager.STATUS_SUCCESSFUL -> {
+                    viewModel.setAppUpdateInstallReady(true)
                     val apkUri = manager.getUriForDownloadedFile(downloadId)
                     if (apkUri == null) {
                         settingsRepository.clearPendingGitHubUpdateDownload()
+                        viewModel.setAppUpdateInstallReady(false)
                         Toast.makeText(context, "Unable to open downloaded APK", Toast.LENGTH_LONG).show()
                         return
                     }
@@ -355,11 +462,13 @@ class HermesAppUpdateCoordinator(
                 DownloadManager.STATUS_PENDING,
                 DownloadManager.STATUS_RUNNING,
                 DownloadManager.STATUS_PAUSED -> {
+                    viewModel.setAppUpdateInstallReady(false)
                     Toast.makeText(context, "GitHub APK is still downloading", Toast.LENGTH_SHORT).show()
                 }
 
                 else -> {
                     settingsRepository.clearPendingGitHubUpdateDownload()
+                    viewModel.setAppUpdateInstallReady(false)
                     Toast.makeText(context, "GitHub APK download failed", Toast.LENGTH_LONG).show()
                 }
             }
@@ -367,12 +476,9 @@ class HermesAppUpdateCoordinator(
     }
 
     private fun launchPackageInstaller(downloadId: Long, apkUri: Uri) {
-        val canRequestInstalls = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            true
-        } else {
-            context.packageManager.canRequestPackageInstalls()
-        }
+        val canRequestInstalls = canRequestUnknownAppInstalls()
         if (!canRequestInstalls) {
+            viewModel.setAppUpdateInstallReady(true)
             val settingsIntent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${context.packageName}")
@@ -395,14 +501,25 @@ class HermesAppUpdateCoordinator(
             NotificationManagerCompat.from(context).cancel(APP_UPDATE_INSTALL_READY_NOTIFICATION_ID)
             settingsRepository.markPendingGitHubUpdateCleanupDownload(downloadId)
             settingsRepository.clearPendingGitHubUpdateDownload()
+            viewModel.setAppUpdateInstallReady(false)
         } else {
+            viewModel.setAppUpdateInstallReady(true)
             Toast.makeText(context, "No installer app was found for the downloaded APK", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun canRequestUnknownAppInstalls(): Boolean {
+        return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            true
+        } else {
+            context.packageManager.canRequestPackageInstalls()
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun showInstallReadyNotification(downloadId: Long) {
         if (notificationPermissionState() != "granted") return
+        viewModel.setAppUpdateInstallReady(true)
         val installIntent = PendingIntent.getActivity(
             context,
             downloadId.hashCode(),

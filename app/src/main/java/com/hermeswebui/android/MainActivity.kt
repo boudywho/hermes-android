@@ -437,6 +437,7 @@ class MainActivity : ComponentActivity() {
             foregroundServiceCoordinator.onActivityResumed()
             viewModel.onAppForegrounded()
             updateWebNotificationPermissionState()
+            appUpdateCoordinator.resumePendingGitHubInstallIfReady()
             viewModel.resumeAutoRetryIfNeeded()
             appUpdateCoordinator.resumePlayUpdateIfNeeded()
             appUpdateCoordinator.scheduleAutomaticAppUpdateCheck()
@@ -446,6 +447,7 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         if (::webView.isInitialized) {
             viewModel.onAppBackgrounded()
+            appUpdateCoordinator.stopPendingGitHubDownloadMonitor()
         }
         super.onPause()
         // If OAuth flow has timed out, clean up the popup to prevent resource leaks.
@@ -642,6 +644,7 @@ class MainActivity : ComponentActivity() {
                     appUpdateStatus = uiState.appUpdateStatus,
                     appUpdateReleaseUrl = uiState.appUpdateReleaseUrl,
                     appUpdateDownloadUrl = uiState.appUpdateDownloadUrl,
+                    appUpdateInstallReady = uiState.appUpdateInstallReady,
                     appUpdateReleaseNotes = uiState.appUpdateReleaseNotes,
                     serverValidation = uiState.serverValidation,
                     appVersionLabel = "Version ${appVersionName()}",

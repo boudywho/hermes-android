@@ -37,6 +37,7 @@ data class MainUiState(
     val appUpdateVersion: String? = null,
     val appUpdateReleaseUrl: String? = null,
     val appUpdateDownloadUrl: String? = null,
+    val appUpdateInstallReady: Boolean = false,
     val appUpdateFileName: String? = null,
     val appUpdateReleaseNotes: String? = null,
     val serverValidation: ServerValidationUiState = ServerValidationUiState()

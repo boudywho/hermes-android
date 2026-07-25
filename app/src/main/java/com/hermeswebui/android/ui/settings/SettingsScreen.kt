@@ -81,6 +81,7 @@ fun SettingsScreen(
     appUpdateStatus: String?,
     appUpdateReleaseUrl: String?,
     appUpdateDownloadUrl: String?,
+    appUpdateInstallReady: Boolean,
     appUpdateReleaseNotes: String?,
     serverValidation: ServerValidationUiState,
     appVersionLabel: String,
@@ -646,21 +647,24 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.labelSmall
                                 )
                             }
-                            if (!appUpdateDownloadUrl.isNullOrBlank() || !appUpdateReleaseUrl.isNullOrBlank()) {
+                            if (!appUpdateDownloadUrl.isNullOrBlank() || appUpdateInstallReady || !appUpdateReleaseUrl.isNullOrBlank()) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    if (!appUpdateDownloadUrl.isNullOrBlank()) {
+                                    if (!appUpdateDownloadUrl.isNullOrBlank() || appUpdateInstallReady) {
+                                        val installAction = appUpdateInstallReady
+                                        val actionLabel = if (installAction) "Install APK" else "Download APK"
+                                        val actionColor = if (installAction) Color(0xFFC62828) else Color(0xFF2E7D32)
                                         Button(
                                             onClick = onDownloadAppUpdate,
                                             modifier = Modifier.weight(1f),
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = primaryColor,
+                                                containerColor = actionColor,
                                                 contentColor = MaterialTheme.colorScheme.onPrimary
                                             )
                                         ) {
-                                            Text("Download / Install APK")
+                                            Text(actionLabel)
                                         }
                                     }
                                     if (!appUpdateReleaseUrl.isNullOrBlank()) {

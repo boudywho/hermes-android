@@ -450,6 +450,10 @@ class MainViewModel(
         _uiState.update { it.copy(appUpdateStatus = status) }
     }
 
+    fun setAppUpdateInstallReady(ready: Boolean) {
+        _uiState.update { it.copy(appUpdateInstallReady = ready) }
+    }
+
     fun setAvailableAppUpdate(update: AppUpdateCheckResult.Available) {
         _uiState.update {
             it.copy(
@@ -457,6 +461,7 @@ class MainViewModel(
                 appUpdateVersion = update.version,
                 appUpdateReleaseUrl = update.releaseUrl,
                 appUpdateDownloadUrl = update.downloadUrl,
+                appUpdateInstallReady = false,
                 appUpdateFileName = update.fileName,
                 appUpdateReleaseNotes = update.releaseNotes
             )
@@ -468,7 +473,8 @@ class MainViewModel(
             it.copy(
                 appUpdateStatus = "A Google Play update is available.",
                 appUpdateVersion = versionCode,
-                appUpdateReleaseUrl = "play://update"
+                appUpdateReleaseUrl = "play://update",
+                appUpdateInstallReady = false
             )
         }
     }
@@ -480,6 +486,7 @@ class MainViewModel(
                 appUpdateVersion = null,
                 appUpdateReleaseUrl = null,
                 appUpdateDownloadUrl = null,
+                appUpdateInstallReady = false,
                 appUpdateFileName = null,
                 appUpdateReleaseNotes = null
             )
