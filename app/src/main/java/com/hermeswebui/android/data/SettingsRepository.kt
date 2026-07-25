@@ -30,7 +30,7 @@ class SettingsRepository(context: Context) : SettingsStore {
 
     private fun runMigration() {
         val lastMigrationVersion = sharedPreferences.getInt(KEY_LAST_MIGRATION_VERSION, 0)
-        val currentMigrationVersion = 11 // Increment this when adding new migrations
+        val currentMigrationVersion = 12 // Increment this when adding new migrations
 
         if (lastMigrationVersion < 1) {
             // Migration 1: Clear dashboard URLs from pre-0.1.5 versions
@@ -111,6 +111,14 @@ class SettingsRepository(context: Context) : SettingsStore {
             // Migration 11: optional VPN launch package defaults to blank.
             if (!sharedPreferences.contains(KEY_VPN_LAUNCH_PACKAGE)) {
                 sharedPreferences.edit { putString(KEY_VPN_LAUNCH_PACKAGE, "") }
+            }
+        }
+
+        if (lastMigrationVersion < 12) {
+            // Migration 12: default VPN launch package to Tailscale when unset or blank.
+            val vpnPackage = sharedPreferences.getString(KEY_VPN_LAUNCH_PACKAGE, null)?.trim().orEmpty()
+            if (vpnPackage.isBlank()) {
+                sharedPreferences.edit { putString(KEY_VPN_LAUNCH_PACKAGE, DEFAULT_VPN_LAUNCH_PACKAGE) }
             }
         }
 
@@ -197,7 +205,7 @@ class SettingsRepository(context: Context) : SettingsStore {
     }
 
     fun getVpnLaunchPackageName(): String {
-        return sharedPreferences.getString(KEY_VPN_LAUNCH_PACKAGE, "").orEmpty().trim()
+        return sharedPreferences.getString(KEY_VPN_LAUNCH_PACKAGE, DEFAULT_VPN_LAUNCH_PACKAGE).orEmpty().trim()
     }
 
     fun setVpnLaunchPackageName(packageName: String) {
@@ -252,12 +260,11 @@ class SettingsRepository(context: Context) : SettingsStore {
         sharedPreferences.edit { putBoolean(KEY_AUTOMATIC_APP_UPDATE_CHECKS_ENABLED, enabled) }
     }
 
-    fun shouldCheckForAppUpdates(nowMs: Long, force: Boolean = false): Boolean {
+    fun shouldCheckForAppUpdates(@Suppress("UNUSED_PARAMETER") nowMs: Long, force: Boolean = false): Boolean {
         if (force) return true
         if (!isAppUpdateAlertsEnabled()) return false
         if (!isAutomaticAppUpdateChecksEnabled()) return false
-        val lastCheckMs = sharedPreferences.getLong(KEY_APP_UPDATE_LAST_CHECK_MS, 0L)
-        return nowMs - lastCheckMs >= APP_UPDATE_CHECK_INTERVAL_MS
+        return true
     }
 
     fun markAppUpdateChecked(nowMs: Long) {
@@ -459,10 +466,10 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val KEY_PENDING_GITHUB_UPDATE_CLEANUP_DOWNLOAD_ID = "pending_github_update_cleanup_download_id"
         private const val KEY_AUTH_PROMPT_SILENCED_URLS = "auth_prompt_silenced_urls"
         private const val KEY_LAST_MIGRATION_VERSION = "last_migration_version"
+        private const val DEFAULT_VPN_LAUNCH_PACKAGE = "com.tailscale.ipn"
         private const val DEFAULT_RECONNECT_POLL_INTERVAL_SECONDS = 1
         private const val MIN_RECONNECT_POLL_INTERVAL_SECONDS = 1
         private const val MAX_RECONNECT_POLL_INTERVAL_SECONDS = 10
-        private const val APP_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
         // Profile-related keys
         private const val KEY_SERVER_PROFILES = "server_profiles"
         private const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"

@@ -106,6 +106,7 @@ import com.hermeswebui.android.ui.MainViewModel
 import com.hermeswebui.android.ui.MainViewModelFactory
 import com.hermeswebui.android.ui.DebugLogFloatingOverlay
 import com.hermeswebui.android.ui.settings.SettingsScreen
+import com.hermeswebui.android.ui.settings.VpnLaunchAppOption
 import com.hermeswebui.android.ui.web.WebShell
 import com.hermeswebui.android.webui.HermesWebUiScripts
 import com.hermeswebui.android.webview.HermesWebViewConfigurator
@@ -513,6 +514,9 @@ class MainActivity : ComponentActivity() {
         val uiState by viewModel.uiState.collectAsState()
         val serverProfiles by viewModel.serverProfiles.collectAsState()
         val snackbarHostState = remember { SnackbarHostState() }
+        val vpnLaunchAppOptions = remember(uiState.isSettingsVisible) {
+            if (uiState.isSettingsVisible) discoverLaunchableApps() else emptyList()
+        }
 
         LaunchedEffect(uiState.pendingShareBanner) {
             val banner = uiState.pendingShareBanner ?: return@LaunchedEffect
@@ -634,6 +638,7 @@ class MainActivity : ComponentActivity() {
                     reconnectPollIntervalSeconds = uiState.reconnectPollIntervalSeconds,
                     requireVpnForTailscaleEnabled = uiState.requireVpnForTailscaleEnabled,
                     vpnLaunchPackageName = uiState.vpnLaunchPackageName,
+                    vpnLaunchAppOptions = vpnLaunchAppOptions,
                     sseTransportEnabled = uiState.sseTransportEnabled,
                     sseSupportStatus = uiState.sseSupportStatus,
                     debugLoggingEnabled = uiState.debugLoggingEnabled,
@@ -1959,6 +1964,35 @@ class MainActivity : ComponentActivity() {
         return runCatching {
             startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.isSuccess
+    }
+
+    private fun discoverLaunchableApps(): List<VpnLaunchAppOption> {
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val launchables = packageManager.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+        val optionsByPackage = linkedMapOf<String, VpnLaunchAppOption>()
+        launchables.forEach { resolveInfo ->
+            val packageName = resolveInfo.activityInfo?.packageName?.trim().orEmpty()
+            if (packageName.isBlank()) return@forEach
+            val displayName = resolveInfo
+                .loadLabel(packageManager)
+                ?.toString()
+                ?.trim()
+                .orEmpty()
+                .ifBlank { packageName }
+            val existing = optionsByPackage[packageName]
+            if (existing == null || displayName.length < existing.displayName.length) {
+                optionsByPackage[packageName] = VpnLaunchAppOption(
+                    displayName = displayName,
+                    packageName = packageName
+                )
+            }
+        }
+        return optionsByPackage.values.sortedWith(
+            compareBy<VpnLaunchAppOption>(
+                { it.displayName.lowercase() },
+                { it.packageName.lowercase() }
+            )
+        )
     }
 
     private fun rememberActiveOAuthPopup(popup: WebView, flow: OAuthPopupFlow) {

@@ -57,7 +57,6 @@ class HermesAppUpdateCoordinator(
 
         private const val APP_UPDATE_NOTIFICATION_ID = 7_001
         private const val APP_UPDATE_INSTALL_READY_NOTIFICATION_ID = 7_002
-        private const val AUTOMATIC_APP_UPDATE_CHECK_DELAY_MS = 60_000L
         private const val GITHUB_DOWNLOAD_MONITOR_INTERVAL_MS = 5_000L
     }
 
@@ -75,11 +74,11 @@ class HermesAppUpdateCoordinator(
     fun scheduleAutomaticAppUpdateCheck() {
         val settings = viewModel.uiState.value.settings
         if (!settings.isConfigured) return
-        if (!settingsRepository.shouldCheckForAppUpdates(System.currentTimeMillis(), force = false)) return
+        if (!settingsRepository.isAppUpdateAlertsEnabled()) return
+        if (!settingsRepository.isAutomaticAppUpdateChecksEnabled()) return
         if (automaticAppUpdateCheckJob?.isActive == true) return
 
         automaticAppUpdateCheckJob = activityScope.launch {
-            delay(AUTOMATIC_APP_UPDATE_CHECK_DELAY_MS)
             if (!isActivityVisible()) return@launch
             checkForAppUpdates(force = false)
             automaticAppUpdateCheckJob = null

@@ -13,10 +13,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -61,6 +64,13 @@ import com.hermeswebui.android.data.ServerProfile
 import com.hermeswebui.android.ui.ServerValidationUiState
 import kotlin.math.roundToInt
 
+private const val DefaultTailscalePackage = "com.tailscale.ipn"
+
+data class VpnLaunchAppOption(
+    val displayName: String,
+    val packageName: String
+)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen(
@@ -71,6 +81,7 @@ fun SettingsScreen(
     reconnectPollIntervalSeconds: Int,
     requireVpnForTailscaleEnabled: Boolean,
     vpnLaunchPackageName: String,
+    vpnLaunchAppOptions: List<VpnLaunchAppOption>,
     sseTransportEnabled: Boolean,
     sseSupportStatus: String?,
     debugLoggingEnabled: Boolean,
@@ -123,6 +134,7 @@ fun SettingsScreen(
     var profileToEdit by remember { mutableStateOf<ServerProfile?>(null) }
     var editCurrentServerWithoutProfile by remember { mutableStateOf(false) }
     var showResetSessionConfirm by remember { mutableStateOf(false) }
+    var showVpnAppPickerDialog by remember { mutableStateOf(false) }
     var serverUrl by remember(initialServerUrl, isConfigured) {
         mutableStateOf(if (isConfigured) initialServerUrl else "")
     }
@@ -200,6 +212,17 @@ fun SettingsScreen(
                     )
                 ) { Text("Reset") }
             }
+        )
+    }
+    if (showVpnAppPickerDialog) {
+        VpnAppPickerDialog(
+            apps = vpnLaunchAppOptions,
+            selectedPackageName = vpnLaunchPackageName,
+            onSelect = { selectedPackageName ->
+                onSetVpnLaunchPackageName(selectedPackageName)
+                showVpnAppPickerDialog = false
+            },
+            onDismiss = { showVpnAppPickerDialog = false }
         )
     }
 
@@ -526,8 +549,11 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            val selectedVpnApp = vpnLaunchAppOptions.firstOrNull {
+                                it.packageName.equals(vpnLaunchPackageName, ignoreCase = true)
+                            }
                             Text(
                                 text = "VPN app package (optional)",
                                 color = onSurface,
@@ -541,6 +567,30 @@ fun SettingsScreen(
                                 singleLine = true,
                                 label = { Text("Package name (for example com.wireguard.android)") }
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showVpnAppPickerDialog = true },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Search installed apps")
+                                }
+                                TextButton(
+                                    onClick = { onSetVpnLaunchPackageName(DefaultTailscalePackage) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Use Tailscale default")
+                                }
+                            }
+                            if (selectedVpnApp != null) {
+                                Text(
+                                    text = "Selected app: ${selectedVpnApp.displayName}",
+                                    color = onSurfaceVar.copy(alpha = 0.88f),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
                             Text(
                                 text = "If set, Hermes tries this app before opening Android VPN settings when VPN is required.",
                                 color = onSurfaceVar,
@@ -598,14 +648,14 @@ fun SettingsScreen(
                             ListItem(
                                 headlineContent = {
                                     Text(
-                                        "Automatic daily checks",
+                                        "Automatic checks on app open",
                                         color = onSurface,
                                         fontWeight = FontWeight.Medium
                                     )
                                 },
                                 supportingContent = {
                                     Text(
-                                        "Waits about one minute after opening, then checks at most once per day.",
+                                        "Checks each time Hermes opens while this toggle is enabled.",
                                         color = onSurfaceVar,
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -1033,6 +1083,96 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+}
+
+@Composable
+private fun VpnAppPickerDialog(
+    apps: List<VpnLaunchAppOption>,
+    selectedPackageName: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val normalizedQuery = query.trim().lowercase()
+    val filteredApps = remember(apps, normalizedQuery) {
+        if (normalizedQuery.isBlank()) {
+            apps
+        } else {
+            apps.filter { app ->
+                app.displayName.contains(normalizedQuery, ignoreCase = true) ||
+                    app.packageName.contains(normalizedQuery, ignoreCase = true)
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose VPN app") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Search by app name or package") }
+                )
+                if (filteredApps.isEmpty()) {
+                    Text(
+                        text = "No matching apps found.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                    ) {
+                        itemsIndexed(
+                            items = filteredApps,
+                            key = { _, app -> app.packageName }
+                        ) { index, app ->
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        text = app.displayName,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(
+                                        text = app.packageName,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                },
+                                trailingContent = {
+                                    if (app.packageName.equals(selectedPackageName, ignoreCase = true)) {
+                                        Text(
+                                            text = "Selected",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                modifier = Modifier.clickable { onSelect(app.packageName) }
+                            )
+                            if (index < filteredApps.lastIndex) {
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }
 
 @Composable
