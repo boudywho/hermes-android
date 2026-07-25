@@ -3,7 +3,7 @@
 > Maintenance-focused Android wrapper for Hermes Web UI. The core wrapper is
 > good as-is; product UI and workflow changes belong in Hermes WebUI.
 >
-> Last updated: 2026-07-24
+> Last updated: 2026-07-25
 
 ---
 
@@ -224,3 +224,4 @@ sketches are captured inline below.
 | BUG-030 | 2026-07-24 | Settings / Connectivity | Added an opt-in VPN startup guard for Tailscale-addressed Hermes servers: when enabled, startup/save/switch loads for `*.ts.net` and Tailscale CGNAT/ULA endpoints require an active Android VPN transport, and the app attempts to open Tailscale (or VPN settings) before showing inline recovery guidance |
 | BUG-031 | 2026-07-24 | Updates | Improved channel-specific update UX to avoid website/store-page detours: GitHub channel notifications now start direct APK download, prompt Android installer after completion, and clean up staged APKs after installer handoff; Play channel keeps using Google Play Core immediate in-app update flow |
 | BUG-032 | 2026-07-24 | Updates / Connectivity | Fixed GitHub APK post-download install handoff by auto-launching installer only while Hermes is foregrounded and otherwise posting an install-ready notification that re-enters Hermes and starts install; also hardened VPN transport detection to check all networks and added an optional custom VPN app package fallback before Android VPN settings |
+| BUG-033 | 2026-07-25 | Settings / Connectivity | Fixed VPN guard startup ordering so Tailscale server launch attempts open the VPN app before server readiness preflight can fail, and declared Android package-visibility queries so the searchable VPN app picker can find installed launcher apps on Android 11+ |

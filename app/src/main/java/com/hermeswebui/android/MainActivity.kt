@@ -1702,6 +1702,15 @@ class MainActivity : ComponentActivity() {
         } else {
             lastLoadedUrl ?: serverUrl
         }
+        if (shouldRequireVpnForServerUrl(serverUrl) && !isVpnTransportActive()) {
+            maybeLaunchVpnForServer(serverUrl)
+            viewModel.openSettingsWithServerValidation(
+                message = "VPN is required before connecting to this Tailscale Hermes server.",
+                isError = true,
+                details = "Start Tailscale (or another VPN) and reopen Hermes to continue."
+            )
+            return
+        }
         serverProfileCoordinator.preflightConfiguredStartupServer(
             serverUrl = serverUrl,
             startUrl = startUrl,
@@ -1975,9 +1984,8 @@ class MainActivity : ComponentActivity() {
             if (packageName.isBlank()) return@forEach
             val displayName = resolveInfo
                 .loadLabel(packageManager)
-                ?.toString()
-                ?.trim()
-                .orEmpty()
+                .toString()
+                .trim()
                 .ifBlank { packageName }
             val existing = optionsByPackage[packageName]
             if (existing == null || displayName.length < existing.displayName.length) {
