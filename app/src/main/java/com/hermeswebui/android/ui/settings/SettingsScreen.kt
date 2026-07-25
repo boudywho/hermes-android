@@ -639,11 +639,49 @@ fun SettingsScreen(
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = onCheckAppUpdates,
-                                modifier = Modifier.fillMaxWidth()
+                            val isPlayUpdateReady = appUpdateReleaseUrl?.startsWith("play://") == true
+                            val primaryUpdateActionLabel = when {
+                                appUpdateInstallReady -> "Install APK"
+                                !appUpdateDownloadUrl.isNullOrBlank() -> "Download APK"
+                                isPlayUpdateReady -> "Update now"
+                                else -> "Check for app update now"
+                            }
+                            val primaryUpdateAction: () -> Unit = when {
+                                appUpdateInstallReady || !appUpdateDownloadUrl.isNullOrBlank() -> onDownloadAppUpdate
+                                isPlayUpdateReady -> onOpenAppUpdateRelease
+                                else -> onCheckAppUpdates
+                            }
+                            val primaryUpdateActionColors = if (
+                                appUpdateInstallReady ||
+                                !appUpdateDownloadUrl.isNullOrBlank() ||
+                                isPlayUpdateReady
                             ) {
-                                Text("Check for app update now")
+                                ButtonDefaults.buttonColors(
+                                    containerColor = if (appUpdateInstallReady) Color(0xFFC62828) else Color(0xFF2E7D32),
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                ButtonDefaults.outlinedButtonColors()
+                            }
+                            if (
+                                appUpdateInstallReady ||
+                                !appUpdateDownloadUrl.isNullOrBlank() ||
+                                isPlayUpdateReady
+                            ) {
+                                Button(
+                                    onClick = primaryUpdateAction,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = primaryUpdateActionColors
+                                ) {
+                                    Text(primaryUpdateActionLabel)
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = primaryUpdateAction,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(primaryUpdateActionLabel)
+                                }
                             }
                             ListItem(
                                 headlineContent = {
@@ -697,47 +735,16 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.labelSmall
                                 )
                             }
-                            if (!appUpdateDownloadUrl.isNullOrBlank() || appUpdateInstallReady || !appUpdateReleaseUrl.isNullOrBlank()) {
+                            if (!appUpdateReleaseUrl.isNullOrBlank() && !appUpdateReleaseUrl.startsWith("play://")) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    if (!appUpdateDownloadUrl.isNullOrBlank() || appUpdateInstallReady) {
-                                        val installAction = appUpdateInstallReady
-                                        val actionLabel = if (installAction) "Install APK" else "Download APK"
-                                        val actionColor = if (installAction) Color(0xFFC62828) else Color(0xFF2E7D32)
-                                        Button(
-                                            onClick = onDownloadAppUpdate,
-                                            modifier = Modifier.weight(1f),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = actionColor,
-                                                contentColor = MaterialTheme.colorScheme.onPrimary
-                                            )
-                                        ) {
-                                            Text(actionLabel)
-                                        }
-                                    }
-                                    if (!appUpdateReleaseUrl.isNullOrBlank()) {
-                                        val isPlay = appUpdateReleaseUrl.startsWith("play://")
-                                        if (isPlay) {
-                                            Button(
-                                                onClick = onOpenAppUpdateRelease,
-                                                modifier = Modifier.weight(1f),
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = primaryColor,
-                                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                                )
-                                            ) {
-                                                Text("Update now")
-                                            }
-                                        } else {
-                                            OutlinedButton(
-                                                onClick = onOpenAppUpdateRelease,
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Text("Release notes")
-                                            }
-                                        }
+                                    OutlinedButton(
+                                        onClick = onOpenAppUpdateRelease,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Release notes")
                                     }
                                 }
                             }

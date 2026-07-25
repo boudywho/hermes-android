@@ -79,9 +79,11 @@ class HermesAppUpdateCoordinator(
         if (automaticAppUpdateCheckJob?.isActive == true) return
 
         automaticAppUpdateCheckJob = activityScope.launch {
-            if (!isActivityVisible()) return@launch
-            checkForAppUpdates(force = false)
-            automaticAppUpdateCheckJob = null
+            try {
+                checkForAppUpdates(force = false)
+            } finally {
+                automaticAppUpdateCheckJob = null
+            }
         }
     }
 
@@ -158,7 +160,6 @@ class HermesAppUpdateCoordinator(
     fun downloadAvailableGitHubUpdate() {
         val pendingDownloadId = settingsRepository.pendingGitHubUpdateDownloadId()
         if (pendingDownloadId > 0L) {
-            viewModel.setAppUpdateInstallReady(true)
             promptInstallDownloadedGithubUpdate(pendingDownloadId)
             return
         }
@@ -180,8 +181,27 @@ class HermesAppUpdateCoordinator(
         if (downloadId <= 0L) return
         val pendingId = settingsRepository.pendingGitHubUpdateDownloadId()
         if (pendingId <= 0L || pendingId != downloadId) return
+        val manager = context.getSystemService(DownloadManager::class.java)
+        val cursor = manager.query(DownloadManager.Query().setFilterById(downloadId))
+        cursor.use {
+            if (!it.moveToFirst()) {
+                settingsRepository.clearPendingGitHubUpdateDownload()
+                viewModel.setAppUpdateInstallReady(false)
+                return
+            }
+            val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+            if (status != DownloadManager.STATUS_SUCCESSFUL) {
+                if (status == DownloadManager.STATUS_FAILED) {
+                    settingsRepository.clearPendingGitHubUpdateDownload()
+                    viewModel.setAppUpdateInstallReady(false)
+                    Toast.makeText(context, "GitHub APK download failed", Toast.LENGTH_LONG).show()
+                }
+                return
+            }
+        }
         if (isActivityVisible()) {
-            promptInstallDownloadedGithubUpdate(downloadId)
+            viewModel.setAppUpdateInstallReady(true)
+            Toast.makeText(context, "GitHub APK downloaded. Tap Install in Settings.", Toast.LENGTH_LONG).show()
         } else {
             viewModel.setAppUpdateInstallReady(true)
             showInstallReadyNotification(downloadId)
@@ -189,9 +209,11 @@ class HermesAppUpdateCoordinator(
     }
 
     fun resumePendingGitHubInstallIfReady() {
-        val hasPendingDownload = settingsRepository.pendingGitHubUpdateDownloadId() > 0L
-        viewModel.setAppUpdateInstallReady(hasPendingDownload)
-        startPendingGitHubDownloadMonitor()
+        if (checkPendingGitHubDownloadForInstall()) {
+            startPendingGitHubDownloadMonitor()
+        } else {
+            stopPendingGitHubDownloadMonitor()
+        }
     }
 
     private fun checkPendingGitHubDownloadForInstall(): Boolean {
@@ -212,17 +234,16 @@ class HermesAppUpdateCoordinator(
             val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
             when (status) {
                 DownloadManager.STATUS_SUCCESSFUL -> {
-                    if (!canRequestUnknownAppInstalls()) {
-                        viewModel.setAppUpdateInstallReady(true)
-                        return false
-                    }
-                    val apkUri = manager.getUriForDownloadedFile(pendingId) ?: run {
+                    if (manager.getUriForDownloadedFile(pendingId) == null) {
                         settingsRepository.clearPendingGitHubUpdateDownload()
                         viewModel.setAppUpdateInstallReady(false)
                         return false
                     }
-                    launchPackageInstaller(pendingId, apkUri)
-                    viewModel.setAppUpdateInstallReady(false)
+                    if (!canRequestUnknownAppInstalls()) {
+                        viewModel.setAppUpdateInstallReady(true)
+                        return false
+                    }
+                    viewModel.setAppUpdateInstallReady(true)
                     return false
                 }
                 DownloadManager.STATUS_FAILED -> {

@@ -130,13 +130,13 @@ object HermesApiClient {
      * Returns true if the Hermes WebUI server responds to its public
      * liveness endpoint at [baseUrl]/api/status.
      */
-    suspend fun isServerReachable(baseUrl: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun isServerReachable(baseUrl: String, timeoutMs: Int = TIMEOUT_MS): Boolean = withContext(Dispatchers.IO) {
         try {
             val url = URI(baseUrl.trimEnd('/')).resolve("/api/status").toURL()
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.connectTimeout = TIMEOUT_MS
-            conn.readTimeout = TIMEOUT_MS
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
             conn.instanceFollowRedirects = false
             val code = conn.responseCode
             conn.disconnect()
@@ -629,4 +629,3 @@ object HermesApiClient {
         return inspect(root) == true
     }
 }
-

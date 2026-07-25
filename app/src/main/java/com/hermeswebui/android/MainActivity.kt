@@ -113,6 +113,9 @@ import com.hermeswebui.android.webview.HermesWebViewConfigurator
 import com.hermeswebui.android.update.HermesAppUpdateCoordinator
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
@@ -124,6 +127,8 @@ private const val HermesNotificationIdBase = 10_000
 private const val HermesGithubIssuesListUrl = "https://github.com/hermes-webui/hermes-android/issues"
 private const val HermesGithubNewIssueUrl = "https://github.com/hermes-webui/hermes-android/issues/new/choose"
 private const val TailscaleAndroidPackage = "com.tailscale.ipn"
+private const val TailscaleConnectVpnAction = "com.tailscale.ipn.CONNECT_VPN"
+private const val VpnReconnectPollIntervalMs = 1_000L
 private const val EnableAppSettingsSidebarShim = true
 
 private val HermesDarkColorScheme = darkColorScheme(
@@ -182,6 +187,8 @@ class MainActivity : ComponentActivity() {
     private var appSettingsEntryScriptHandler: ScriptHandler? = null
     private var enterKeyNewlineScriptHandler: ScriptHandler? = null
     private var lastVpnLaunchAttemptElapsedMs: Long = 0L
+    private var pendingVpnGuardUrl: String? = null
+    private var vpnReconnectWaitJob: Job? = null
     private var activityVisible = false
     private lateinit var appUpdateManager: AppUpdateManager
     private lateinit var appUpdateCoordinator: HermesAppUpdateCoordinator
@@ -440,6 +447,7 @@ class MainActivity : ComponentActivity() {
             updateWebNotificationPermissionState()
             appUpdateCoordinator.resumePendingGitHubInstallIfReady()
             viewModel.resumeAutoRetryIfNeeded()
+            startVpnReconnectWaitLoopIfNeeded()
             appUpdateCoordinator.resumePlayUpdateIfNeeded()
             appUpdateCoordinator.scheduleAutomaticAppUpdateCheck()
         }
@@ -466,6 +474,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        stopVpnReconnectWaitLoop()
         runCatching { unregisterReceiver(appUpdateDownloadReceiver) }
         super.onDestroy()
     }
@@ -1703,11 +1712,9 @@ class MainActivity : ComponentActivity() {
             lastLoadedUrl ?: serverUrl
         }
         if (shouldRequireVpnForServerUrl(serverUrl) && !isVpnTransportActive()) {
-            maybeLaunchVpnForServer(serverUrl)
-            viewModel.openSettingsWithServerValidation(
-                message = "VPN is required before connecting to this Tailscale Hermes server.",
-                isError = true,
-                details = "Start Tailscale (or another VPN) and reopen Hermes to continue."
+            queueVpnGuardedLoad(
+                serverUrl = serverUrl,
+                details = "Trying to connect Tailscale automatically. Hermes retries every second while waiting for VPN."
             )
             return
         }
@@ -1920,15 +1927,15 @@ class MainActivity : ComponentActivity() {
 
     private fun loadServerUrlWithVpnGuard(url: String) {
         if (!shouldRequireVpnForServerUrl(url) || isVpnTransportActive()) {
+            pendingVpnGuardUrl = null
+            stopVpnReconnectWaitLoop()
             webView.loadUrl(url)
             return
         }
 
-        maybeLaunchVpnForServer(url)
-        viewModel.openSettingsWithServerValidation(
-            message = "VPN is required before connecting to this Tailscale Hermes server.",
-            isError = true,
-            details = "Start Tailscale (or another VPN) and try again."
+        queueVpnGuardedLoad(
+            serverUrl = url,
+            details = "Trying to connect Tailscale automatically. Hermes retries every second while waiting for VPN."
         )
     }
 
@@ -1946,14 +1953,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun maybeLaunchVpnForServer(url: String) {
+    private fun maybeLaunchVpnForServer(url: String, showPrompt: Boolean) {
         val nowElapsed = SystemClock.elapsedRealtime()
         if (nowElapsed - lastVpnLaunchAttemptElapsedMs < 5_000L) return
         lastVpnLaunchAttemptElapsedMs = nowElapsed
 
         val preferredVpnPackage = viewModel.uiState.value.vpnLaunchPackageName
         val launchedVpnApp = if (TailscaleEndpointDetector.isTailscaleUrl(url)) {
-            launchVpnApp(TailscaleAndroidPackage) || launchVpnApp(preferredVpnPackage)
+            val requestedAutoConnect = requestTailscaleConnect()
+            launchVpnApp(TailscaleAndroidPackage) || launchVpnApp(preferredVpnPackage) || requestedAutoConnect
         } else {
             launchVpnApp(preferredVpnPackage)
         }
@@ -1963,7 +1971,20 @@ class MainActivity : ComponentActivity() {
             runCatching { startActivity(vpnIntent) }
         }
 
-        Toast.makeText(this, "Start your VPN, then reconnect Hermes.", Toast.LENGTH_LONG).show()
+        if (showPrompt) {
+            Toast.makeText(this, "Start your VPN, then reconnect Hermes.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun requestTailscaleConnect(): Boolean {
+        val connectIntent = Intent(TailscaleConnectVpnAction).apply {
+            `package` = TailscaleAndroidPackage
+            addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+        }
+        return runCatching {
+            sendBroadcast(connectIntent)
+            true
+        }.getOrElse { false }
     }
 
     private fun launchVpnApp(packageName: String?): Boolean {
@@ -2070,6 +2091,55 @@ class MainActivity : ComponentActivity() {
             clearActiveOAuthPopup()
             clearActiveMainFrameOAuth()
         }
+    }
+
+    private fun queueVpnGuardedLoad(serverUrl: String, details: String) {
+        pendingVpnGuardUrl = serverUrl
+        maybeLaunchVpnForServer(serverUrl, showPrompt = true)
+        startVpnReconnectWaitLoopIfNeeded()
+        viewModel.openSettingsWithServerValidation(
+            message = "VPN is required before connecting to this Tailscale Hermes server.",
+            isError = true,
+            details = details
+        )
+    }
+
+    private fun startVpnReconnectWaitLoopIfNeeded() {
+        if (!activityVisible) return
+        val targetUrl = pendingVpnGuardUrl ?: return
+        if (!shouldRequireVpnForServerUrl(targetUrl)) {
+            pendingVpnGuardUrl = null
+            return
+        }
+        if (vpnReconnectWaitJob?.isActive == true) return
+        vpnReconnectWaitJob = lifecycleScope.launch {
+            while (isActive) {
+                val probeStartedAt = SystemClock.elapsedRealtime()
+                val pendingUrl = pendingVpnGuardUrl ?: return@launch
+                if (!shouldRequireVpnForServerUrl(pendingUrl)) {
+                    pendingVpnGuardUrl = null
+                    return@launch
+                }
+                if (
+                    isVpnTransportActive() &&
+                    HermesApiClient.isServerReachable(
+                        baseUrl = pendingUrl,
+                        timeoutMs = VpnReconnectPollIntervalMs.toInt() - 100
+                    )
+                ) {
+                    pendingVpnGuardUrl = null
+                    loadServerUrlWithVpnGuard(pendingUrl)
+                    return@launch
+                }
+                val elapsedMs = SystemClock.elapsedRealtime() - probeStartedAt
+                delay((VpnReconnectPollIntervalMs - elapsedMs).coerceAtLeast(0L))
+            }
+        }
+    }
+
+    private fun stopVpnReconnectWaitLoop() {
+        vpnReconnectWaitJob?.cancel()
+        vpnReconnectWaitJob = null
     }
 
 }
