@@ -124,6 +124,7 @@ fun SettingsScreen(
     onRenameProfile: (String, String) -> Unit,
     onEditProfile: (String, String, String) -> Unit,
     onSwitchProfile: (String) -> Unit,
+    onReconnectCurrentServer: () -> Unit,
     onClearServerValidation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -346,7 +347,7 @@ fun SettingsScreen(
                                 trailingContent = { ServerCurrentBadge() },
                                 colors = ListItemDefaults.colors(containerColor = surfaceVariant),
                                 modifier = Modifier.combinedClickable(
-                                    onClick = {},
+                                    onClick = onReconnectCurrentServer,
                                     onLongClick = { editCurrentServerWithoutProfile = true }
                                 )
                             )
@@ -387,7 +388,13 @@ fun SettingsScreen(
                                     colors = ListItemDefaults.colors(containerColor = surfaceVariant),
                                     modifier = Modifier
                                         .combinedClickable(
-                                            onClick = { if (!isCurrent) onSwitchProfile(profile.id) },
+                                            onClick = {
+                                                if (isCurrent) {
+                                                    onReconnectCurrentServer()
+                                                } else {
+                                                    onSwitchProfile(profile.id)
+                                                }
+                                            },
                                             onLongClick = { profileToEdit = profile }
                                         )
                                         .alpha(if (isCurrent) 1f else 0.85f)

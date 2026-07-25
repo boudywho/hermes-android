@@ -4,9 +4,11 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
 import com.hermeswebui.android.ui.ServerValidationUiState
 import org.junit.Rule
 import org.junit.Test
@@ -28,6 +30,7 @@ class SettingsScreenTest {
                 reconnectPollIntervalSeconds = 1,
                 requireVpnForTailscaleEnabled = false,
                 vpnLaunchPackageName = "",
+                vpnLaunchAppOptions = emptyList(),
                 sseTransportEnabled = false,
                 sseSupportStatus = null,
                 debugLoggingEnabled = false,
@@ -74,6 +77,7 @@ class SettingsScreenTest {
                 onRenameProfile = { _, _ -> },
                 onEditProfile = { _, _, _ -> },
                 onSwitchProfile = {},
+                onReconnectCurrentServer = {},
                 onClearServerValidation = {}
             )
         }
@@ -92,6 +96,7 @@ class SettingsScreenTest {
                 reconnectPollIntervalSeconds = 1,
                 requireVpnForTailscaleEnabled = false,
                 vpnLaunchPackageName = "",
+                vpnLaunchAppOptions = emptyList(),
                 sseTransportEnabled = false,
                 sseSupportStatus = null,
                 debugLoggingEnabled = false,
@@ -138,6 +143,7 @@ class SettingsScreenTest {
                 onRenameProfile = { _, _ -> },
                 onEditProfile = { _, _, _ -> },
                 onSwitchProfile = {},
+                onReconnectCurrentServer = {},
                 onClearServerValidation = {}
             )
         }
@@ -147,7 +153,8 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun configuredCurrentServerWithoutProfiles_canLongPressToEdit() {
+    fun configuredCurrentServerWithoutProfiles_reconnectsOnTapAndCanLongPressToEdit() {
+        var reconnectCount = 0
         composeTestRule.setContent {
             SettingsScreen(
                 initialServerUrl = "https://hermes.example.com",
@@ -157,6 +164,7 @@ class SettingsScreenTest {
                 reconnectPollIntervalSeconds = 1,
                 requireVpnForTailscaleEnabled = false,
                 vpnLaunchPackageName = "",
+                vpnLaunchAppOptions = emptyList(),
                 sseTransportEnabled = false,
                 sseSupportStatus = null,
                 debugLoggingEnabled = false,
@@ -199,9 +207,13 @@ class SettingsScreenTest {
                 onRenameProfile = { _, _ -> },
                 onEditProfile = { _, _, _ -> },
                 onSwitchProfile = {},
+                onReconnectCurrentServer = { reconnectCount++ },
                 onClearServerValidation = {}
             )
         }
+
+        composeTestRule.onNodeWithText("Current server").performClick()
+        assertThat(reconnectCount).isEqualTo(1)
 
         composeTestRule.onNodeWithText("Current server")
             .performTouchInput { longClick() }

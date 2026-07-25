@@ -143,7 +143,7 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 - Notification routing, microphone access, and callback handling stay scoped to trusted Hermes origins
 - Local settings are encrypted with Android Keystore-backed storage
 - Optional VPN/Tailscale startup guard for Tailscale-addressed Hermes servers (`*.ts.net`, Tailscale CGNAT/ULA ranges)
-- Optional VPN launch-app picker with search plus a Tailscale default package fallback before Android VPN settings when the VPN/Tailscale guard blocks a server load; Hermes then keeps an every-second `/api/status` probe alive across the Tailscale app handoff and auto-continues once VPN and server are ready
+- Optional VPN launch-app picker with search plus a Tailscale default package fallback before Android VPN settings when the VPN/Tailscale guard blocks a server load; Hermes first asks Tailscale to connect while keeping Hermes on screen, keeps an every-second `/api/status` probe alive, automatically reloads once VPN and server are ready, and only opens Tailscale if auto-connect has not established a tunnel within ten seconds
 
 ## What It Feels Like
 

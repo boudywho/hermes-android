@@ -6,6 +6,7 @@ import android.app.DownloadManager
 import android.app.AlertDialog
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ActivityNotFoundException
@@ -81,6 +82,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.content.FileProvider
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.ViewModelProvider
 import androidx.webkit.ScriptHandler
@@ -124,11 +126,13 @@ import java.net.InetAddress
 private const val HermesNotificationBridgeName = "HermesAndroidNotifications"
 private const val HermesNotificationChannelId = "hermes_webui_notifications"
 private const val HermesNotificationIdBase = 10_000
+private const val HermesVpnReconnectNotificationId = 9_900
 private const val HermesGithubIssuesListUrl = "https://github.com/hermes-webui/hermes-android/issues"
 private const val HermesGithubNewIssueUrl = "https://github.com/hermes-webui/hermes-android/issues/new/choose"
 private const val TailscaleAndroidPackage = "com.tailscale.ipn"
 private const val TailscaleConnectVpnAction = "com.tailscale.ipn.CONNECT_VPN"
 private const val VpnReconnectPollIntervalMs = 1_000L
+private const val TailscaleAutoConnectFallbackMs = 10_000L
 private const val EnableAppSettingsSidebarShim = true
 
 private val HermesDarkColorScheme = darkColorScheme(
@@ -189,6 +193,7 @@ class MainActivity : ComponentActivity() {
     private var lastVpnLaunchAttemptElapsedMs: Long = 0L
     private var pendingVpnGuardUrl: String? = null
     private var vpnReconnectWaitJob: Job? = null
+    private var tailscaleLaunchFallbackJob: Job? = null
     private var activityVisible = false
     private lateinit var appUpdateManager: AppUpdateManager
     private lateinit var appUpdateCoordinator: HermesAppUpdateCoordinator
@@ -392,7 +397,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AppContent(
-                onReload = { webView.reload() },
+                onReload = { refreshConfiguredHermes() },
                 onOpenExternal = { openInExternalBrowser(viewModel.uiState.value.currentUrl) },
                 onSaveSettings = { serverUrl -> saveSettings(serverUrl) },
                 onResetSession = { resetWebSession() },
@@ -535,7 +540,7 @@ class MainActivity : ComponentActivity() {
         // Auto-reload when the retry loop detects the server is back.
         LaunchedEffect(Unit) {
             viewModel.autoReloadEvent.collect {
-                webView.reload()
+                refreshConfiguredHermes()
             }
         }
 
@@ -745,6 +750,7 @@ class MainActivity : ComponentActivity() {
                     onRenameProfile = { profileId, newName -> viewModel.renameServerProfile(profileId, newName) },
                     onEditProfile = { profileId, newName, newUrl -> serverProfileCoordinator.handleEditServerProfile(profileId, newName, newUrl) },
                     onSwitchProfile = { profileId -> serverProfileCoordinator.handleSwitchServerProfile(profileId) },
+                    onReconnectCurrentServer = { refreshConfiguredHermes(closeSettings = true) },
                     onClearServerValidation = { viewModel.clearServerValidationState() }
                 )
             } // end if (isSettingsVisible)
@@ -1939,6 +1945,19 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun refreshConfiguredHermes(closeSettings: Boolean = false) {
+        val state = viewModel.uiState.value
+        val targetUrl = state.currentUrl.takeIf(::matchesConfiguredWebUiRoute) ?: state.settings.serverUrl
+        if (targetUrl.isBlank()) {
+            viewModel.openSettings()
+            return
+        }
+        if (closeSettings) {
+            viewModel.closeSettings()
+        }
+        loadServerUrlWithVpnGuard(targetUrl)
+    }
+
     private fun shouldRequireVpnForServerUrl(url: String): Boolean {
         return viewModel.uiState.value.requireVpnForTailscaleEnabled &&
             TailscaleEndpointDetector.isTailscaleUrl(url)
@@ -1959,9 +1978,13 @@ class MainActivity : ComponentActivity() {
         lastVpnLaunchAttemptElapsedMs = nowElapsed
 
         val preferredVpnPackage = viewModel.uiState.value.vpnLaunchPackageName
+        if (TailscaleEndpointDetector.isTailscaleUrl(url) && requestTailscaleConnect()) {
+            scheduleTailscaleLaunchFallback(url, preferredVpnPackage, showPrompt)
+            return
+        }
+
         val launchedVpnApp = if (TailscaleEndpointDetector.isTailscaleUrl(url)) {
-            val requestedAutoConnect = requestTailscaleConnect()
-            launchVpnApp(TailscaleAndroidPackage) || launchVpnApp(preferredVpnPackage) || requestedAutoConnect
+            launchVpnApp(TailscaleAndroidPackage) || launchVpnApp(preferredVpnPackage)
         } else {
             launchVpnApp(preferredVpnPackage)
         }
@@ -1982,9 +2005,36 @@ class MainActivity : ComponentActivity() {
             addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
         }
         return runCatching {
+            packageManager.getApplicationInfo(TailscaleAndroidPackage, 0)
             sendBroadcast(connectIntent)
             true
         }.getOrElse { false }
+    }
+
+    private fun scheduleTailscaleLaunchFallback(
+        serverUrl: String,
+        preferredVpnPackage: String,
+        showPrompt: Boolean
+    ) {
+        tailscaleLaunchFallbackJob?.cancel()
+        tailscaleLaunchFallbackJob = lifecycleScope.launch {
+            delay(TailscaleAutoConnectFallbackMs)
+            if (pendingVpnGuardUrl != serverUrl || isVpnTransportActive()) return@launch
+
+            val launchedVpnApp = launchVpnApp(TailscaleAndroidPackage) ||
+                launchVpnApp(preferredVpnPackage)
+            if (!launchedVpnApp) {
+                val vpnIntent = Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { startActivity(vpnIntent) }
+            }
+            if (showPrompt) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Tailscale is taking longer than expected. Complete its connection, and Hermes will continue automatically.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     private fun launchVpnApp(packageName: String?): Boolean {
@@ -2105,7 +2155,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startVpnReconnectWaitLoopIfNeeded() {
-        if (!activityVisible) return
         val targetUrl = pendingVpnGuardUrl ?: return
         if (!shouldRequireVpnForServerUrl(targetUrl)) {
             pendingVpnGuardUrl = null
@@ -2128,7 +2177,9 @@ class MainActivity : ComponentActivity() {
                     )
                 ) {
                     pendingVpnGuardUrl = null
+                    viewModel.closeSettings()
                     loadServerUrlWithVpnGuard(pendingUrl)
+                    notifyVpnRecoveryReadyIfBackgrounded()
                     return@launch
                 }
                 val elapsedMs = SystemClock.elapsedRealtime() - probeStartedAt
@@ -2140,6 +2191,30 @@ class MainActivity : ComponentActivity() {
     private fun stopVpnReconnectWaitLoop() {
         vpnReconnectWaitJob?.cancel()
         vpnReconnectWaitJob = null
+        tailscaleLaunchFallbackJob?.cancel()
+        tailscaleLaunchFallbackJob = null
+    }
+
+    private fun notifyVpnRecoveryReadyIfBackgrounded() {
+        if (activityVisible) return
+        val openHermesIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val openHermesPendingIntent = PendingIntent.getActivity(
+            this,
+            HermesVpnReconnectNotificationId,
+            openHermesIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, HermesNotificationChannelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Hermes reconnected")
+            .setContentText("Tailscale and your Hermes server are ready.")
+            .setContentIntent(openHermesPendingIntent)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)
+            ?.notify(HermesVpnReconnectNotificationId, notification)
     }
 
 }
