@@ -43,6 +43,7 @@ class MainViewModel(
         backgroundActivityFullTextEnabled = settingsRepositoryImpl?.isBackgroundActivityFullTextEnabled() ?: false,
         reconnectPollIntervalSeconds = settingsRepositoryImpl?.getReconnectPollIntervalSeconds() ?: 1,
         requireVpnForTailscaleEnabled = settingsRepositoryImpl?.isRequireVpnForTailscaleEnabled() ?: false,
+        vpnLaunchPackageName = settingsRepositoryImpl?.getVpnLaunchPackageName().orEmpty(),
         sseTransportEnabled = settingsRepositoryImpl?.isSseTransportEnabled() ?: false,
         debugLoggingEnabled = settingsRepositoryImpl?.isDebugLoggingEnabled() ?: false,
         blockScreenshotsEnabled = settingsRepositoryImpl?.isBlockScreenshotsEnabled() ?: false,
@@ -415,6 +416,11 @@ class MainViewModel(
         _uiState.update { it.copy(requireVpnForTailscaleEnabled = enabled) }
     }
 
+    fun setVpnLaunchPackageName(packageName: String) {
+        settingsRepositoryImpl?.setVpnLaunchPackageName(packageName)
+        _uiState.update { it.copy(vpnLaunchPackageName = packageName.trim()) }
+    }
+
     fun setDebugLoggingEnabled(enabled: Boolean) {
         settingsRepositoryImpl?.setDebugLoggingEnabled(enabled)
         _uiState.update { it.copy(debugLoggingEnabled = enabled) }
@@ -502,6 +508,7 @@ class MainViewModel(
                 backgroundActivityFullTextEnabled = repo.isBackgroundActivityFullTextEnabled(),
                 reconnectPollIntervalSeconds = repo.getReconnectPollIntervalSeconds(),
                 requireVpnForTailscaleEnabled = repo.isRequireVpnForTailscaleEnabled(),
+                vpnLaunchPackageName = repo.getVpnLaunchPackageName(),
                 sseTransportEnabled = repo.isSseTransportEnabled(),
                 debugLoggingEnabled = repo.isDebugLoggingEnabled(),
                 blockScreenshotsEnabled = repo.isBlockScreenshotsEnabled(),

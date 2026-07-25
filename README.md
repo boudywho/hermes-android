@@ -133,6 +133,7 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 - Optional ongoing background activity notification for trusted Hermes sessions
 - Optional debug-log capture with persistent foreground notification and one-tap stop action
 - Channel-aware app updates: Play uses in-app update flow, GitHub APK builds download and hand off to installer in-app
+- GitHub APK update installs auto-start in-app when Hermes is open, and show an install-ready notification when Hermes is backgrounded
 
 ### Security and trust boundaries
 
@@ -142,6 +143,7 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 - Notification routing, microphone access, and callback handling stay scoped to trusted Hermes origins
 - Local settings are encrypted with Android Keystore-backed storage
 - Optional VPN/Tailscale startup guard for Tailscale-addressed Hermes servers (`*.ts.net`, Tailscale CGNAT/ULA ranges)
+- Optional custom VPN app package fallback before Android VPN settings when the VPN/Tailscale guard blocks a server load
 
 ## What It Feels Like
 

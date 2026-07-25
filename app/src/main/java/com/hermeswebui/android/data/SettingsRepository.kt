@@ -30,7 +30,7 @@ class SettingsRepository(context: Context) : SettingsStore {
 
     private fun runMigration() {
         val lastMigrationVersion = sharedPreferences.getInt(KEY_LAST_MIGRATION_VERSION, 0)
-        val currentMigrationVersion = 10 // Increment this when adding new migrations
+        val currentMigrationVersion = 11 // Increment this when adding new migrations
 
         if (lastMigrationVersion < 1) {
             // Migration 1: Clear dashboard URLs from pre-0.1.5 versions
@@ -104,6 +104,13 @@ class SettingsRepository(context: Context) : SettingsStore {
             // Migration 10: VPN/Tailscale guard defaults to opt-in (disabled).
             if (!sharedPreferences.contains(KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED)) {
                 sharedPreferences.edit { putBoolean(KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED, false) }
+            }
+        }
+
+        if (lastMigrationVersion < 11) {
+            // Migration 11: optional VPN launch package defaults to blank.
+            if (!sharedPreferences.contains(KEY_VPN_LAUNCH_PACKAGE)) {
+                sharedPreferences.edit { putString(KEY_VPN_LAUNCH_PACKAGE, "") }
             }
         }
 
@@ -187,6 +194,14 @@ class SettingsRepository(context: Context) : SettingsStore {
 
     fun setRequireVpnForTailscaleEnabled(enabled: Boolean) {
         sharedPreferences.edit { putBoolean(KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED, enabled) }
+    }
+
+    fun getVpnLaunchPackageName(): String {
+        return sharedPreferences.getString(KEY_VPN_LAUNCH_PACKAGE, "").orEmpty().trim()
+    }
+
+    fun setVpnLaunchPackageName(packageName: String) {
+        sharedPreferences.edit { putString(KEY_VPN_LAUNCH_PACKAGE, packageName.trim()) }
     }
 
     fun isDebugLoggingEnabled(): Boolean {
@@ -431,6 +446,7 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val KEY_BACKGROUND_RECONNECT_ENABLED = "background_reconnect_enabled"
         private const val KEY_RECONNECT_POLL_INTERVAL_SECONDS = "reconnect_poll_interval_seconds"
         private const val KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED = "require_vpn_for_tailscale_enabled"
+        private const val KEY_VPN_LAUNCH_PACKAGE = "vpn_launch_package"
         private const val KEY_DEBUG_LOGGING_ENABLED = "debug_logging_enabled"
         private const val KEY_SSE_TRANSPORT_ENABLED = "sse_transport_enabled"
         private const val KEY_BLOCK_SCREENSHOTS_ENABLED = "block_screenshots_enabled"

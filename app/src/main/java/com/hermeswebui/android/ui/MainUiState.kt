@@ -26,6 +26,7 @@ data class MainUiState(
     val backgroundActivityFullTextEnabled: Boolean = false,
     val reconnectPollIntervalSeconds: Int = 1,
     val requireVpnForTailscaleEnabled: Boolean = false,
+    val vpnLaunchPackageName: String = "",
     val sseTransportEnabled: Boolean = false,
     val sseSupportStatus: String? = null,
     val debugLoggingEnabled: Boolean = false,

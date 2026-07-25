@@ -55,6 +55,7 @@ class HermesAppUpdateCoordinator(
         const val EXTRA_APP_UPDATE_DOWNLOAD_ID = "com.hermeswebui.android.extra.APP_UPDATE_DOWNLOAD_ID"
 
         private const val APP_UPDATE_NOTIFICATION_ID = 7_001
+        private const val APP_UPDATE_INSTALL_READY_NOTIFICATION_ID = 7_002
         private const val AUTOMATIC_APP_UPDATE_CHECK_DELAY_MS = 60_000L
     }
 
@@ -120,6 +121,7 @@ class HermesAppUpdateCoordinator(
 
             ACTION_INSTALL_DOWNLOADED_APP_UPDATE -> {
                 val downloadId = intent.getLongExtra(EXTRA_APP_UPDATE_DOWNLOAD_ID, -1L)
+                NotificationManagerCompat.from(context).cancel(APP_UPDATE_INSTALL_READY_NOTIFICATION_ID)
                 promptInstallDownloadedGithubUpdate(downloadId)
                 true
             }
@@ -151,7 +153,11 @@ class HermesAppUpdateCoordinator(
         if (downloadId <= 0L) return
         val pendingId = settingsRepository.pendingGitHubUpdateDownloadId()
         if (pendingId <= 0L || pendingId != downloadId) return
-        promptInstallDownloadedGithubUpdate(downloadId)
+        if (isActivityVisible()) {
+            promptInstallDownloadedGithubUpdate(downloadId)
+        } else {
+            showInstallReadyNotification(downloadId)
+        }
     }
 
     fun cleanupInstalledGitHubUpdateArtifact() {
@@ -386,11 +392,40 @@ class HermesAppUpdateCoordinator(
         }
         val started = runCatching { context.startActivity(installIntent) }.isSuccess
         if (started) {
+            NotificationManagerCompat.from(context).cancel(APP_UPDATE_INSTALL_READY_NOTIFICATION_ID)
             settingsRepository.markPendingGitHubUpdateCleanupDownload(downloadId)
             settingsRepository.clearPendingGitHubUpdateDownload()
         } else {
             Toast.makeText(context, "No installer app was found for the downloaded APK", Toast.LENGTH_LONG).show()
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun showInstallReadyNotification(downloadId: Long) {
+        if (notificationPermissionState() != "granted") return
+        val installIntent = PendingIntent.getActivity(
+            context,
+            downloadId.hashCode(),
+            Intent(context, MainActivity::class.java).apply {
+                action = ACTION_INSTALL_DOWNLOADED_APP_UPDATE
+                putExtra(EXTRA_APP_UPDATE_DOWNLOAD_ID, downloadId)
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, notificationChannelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("GitHub APK downloaded")
+            .setContentText("Tap to install the update.")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Tap to install the downloaded Hermes WebUI update APK."))
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setColor(ContextCompat.getColor(context, R.color.brand_sky))
+            .setContentIntent(installIntent)
+            .addAction(0, "Install", installIntent)
+            .build()
+        NotificationManagerCompat.from(context).notify(APP_UPDATE_INSTALL_READY_NOTIFICATION_ID, notification)
     }
 
     @SuppressLint("MissingPermission")

@@ -631,6 +631,7 @@ class MainActivity : ComponentActivity() {
                     backgroundActivityFullTextEnabled = uiState.backgroundActivityFullTextEnabled,
                     reconnectPollIntervalSeconds = uiState.reconnectPollIntervalSeconds,
                     requireVpnForTailscaleEnabled = uiState.requireVpnForTailscaleEnabled,
+                    vpnLaunchPackageName = uiState.vpnLaunchPackageName,
                     sseTransportEnabled = uiState.sseTransportEnabled,
                     sseSupportStatus = uiState.sseSupportStatus,
                     debugLoggingEnabled = uiState.debugLoggingEnabled,
@@ -666,6 +667,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onSetRequireVpnForTailscaleEnabled = { enabled ->
                         viewModel.setRequireVpnForTailscaleEnabled(enabled)
+                    },
+                    onSetVpnLaunchPackageName = { packageName ->
+                        viewModel.setVpnLaunchPackageName(packageName)
                     },
                     onSetSseTransportEnabled = { enabled ->
                         setSseTransportEnabled(enabled)
@@ -1916,12 +1920,13 @@ class MainActivity : ComponentActivity() {
             TailscaleEndpointDetector.isTailscaleUrl(url)
     }
 
+    @Suppress("DEPRECATION")
     private fun isVpnTransportActive(): Boolean {
         val manager = getSystemService(ConnectivityManager::class.java) ?: return false
-        val network = manager.activeNetwork ?: return false
-        val capabilities = manager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return manager.getAllNetworks().any { network ->
+            val capabilities = manager.getNetworkCapabilities(network) ?: return@any false
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        }
     }
 
     private fun maybeLaunchVpnForServer(url: String) {
@@ -1929,24 +1934,28 @@ class MainActivity : ComponentActivity() {
         if (nowElapsed - lastVpnLaunchAttemptElapsedMs < 5_000L) return
         lastVpnLaunchAttemptElapsedMs = nowElapsed
 
-        val launchedTailscale = if (TailscaleEndpointDetector.isTailscaleUrl(url)) {
-            val tailscaleIntent = packageManager.getLaunchIntentForPackage(TailscaleAndroidPackage)
-            if (tailscaleIntent != null) {
-                startActivity(tailscaleIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                true
-            } else {
-                false
-            }
+        val preferredVpnPackage = viewModel.uiState.value.vpnLaunchPackageName
+        val launchedVpnApp = if (TailscaleEndpointDetector.isTailscaleUrl(url)) {
+            launchVpnApp(TailscaleAndroidPackage) || launchVpnApp(preferredVpnPackage)
         } else {
-            false
+            launchVpnApp(preferredVpnPackage)
         }
 
-        if (!launchedTailscale) {
+        if (!launchedVpnApp) {
             val vpnIntent = Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             runCatching { startActivity(vpnIntent) }
         }
 
-        Toast.makeText(this, "Start VPN/Tailscale, then reconnect Hermes.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Start your VPN, then reconnect Hermes.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun launchVpnApp(packageName: String?): Boolean {
+        val normalizedPackageName = packageName?.trim().orEmpty()
+        if (normalizedPackageName.isBlank()) return false
+        val launchIntent = packageManager.getLaunchIntentForPackage(normalizedPackageName) ?: return false
+        return runCatching {
+            startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
     }
 
     private fun rememberActiveOAuthPopup(popup: WebView, flow: OAuthPopupFlow) {

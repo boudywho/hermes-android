@@ -70,6 +70,7 @@ fun SettingsScreen(
     backgroundActivityFullTextEnabled: Boolean,
     reconnectPollIntervalSeconds: Int,
     requireVpnForTailscaleEnabled: Boolean,
+    vpnLaunchPackageName: String,
     sseTransportEnabled: Boolean,
     sseSupportStatus: String?,
     debugLoggingEnabled: Boolean,
@@ -91,6 +92,7 @@ fun SettingsScreen(
     onSetBackgroundActivityFullTextEnabled: (Boolean) -> Unit,
     onSetReconnectPollIntervalSeconds: (Int) -> Unit,
     onSetRequireVpnForTailscaleEnabled: (Boolean) -> Unit,
+    onSetVpnLaunchPackageName: (String) -> Unit,
     onSetSseTransportEnabled: (Boolean) -> Unit,
     onCheckSseSupport: () -> Unit,
     onCopySsePrompt: () -> Unit,
@@ -518,6 +520,32 @@ fun SettingsScreen(
                                 onSetRequireVpnForTailscaleEnabled(!requireVpnForTailscaleEnabled)
                             }
                         )
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "VPN app package (optional)",
+                                color = onSurface,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            OutlinedTextField(
+                                value = vpnLaunchPackageName,
+                                onValueChange = onSetVpnLaunchPackageName,
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("Package name (for example com.wireguard.android)") }
+                            )
+                            Text(
+                                text = "If set, Hermes tries this app before opening Android VPN settings when VPN is required.",
+                                color = onSurfaceVar,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
 
                         HorizontalDivider(color = outlineVar.copy(alpha = 0.5f))
 
