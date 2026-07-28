@@ -167,9 +167,7 @@ object HermesWebUiScripts {
             return true;
           }
 
-          function repairElement(el, viewport) {
-            if (el.getAttribute(REPAIRED_ATTR)) return false;
-
+          function updateRepair(el, viewport) {
             var maxPanel = Math.max(180, Math.round(viewport.height * 0.82)) + 'px';
             var minPanel = Math.max(100, Math.round(viewport.height * 0.25)) + 'px';
 
@@ -177,21 +175,26 @@ object HermesWebUiScripts {
             el.style.minHeight = minPanel;
             el.style.maxHeight = maxPanel;
             el.style.overflowY = 'auto';
+          }
+
+          function repairElement(el, viewport) {
+            if (el.getAttribute(REPAIRED_ATTR)) return false;
+
+            updateRepair(el, viewport);
             el.setAttribute(REPAIRED_ATTR, 'true');
 
             return true;
           }
 
-          function clearRepairIfHealthy(el, viewport) {
+          function clearRepairIfHidden(el) {
             if (!el.getAttribute(REPAIRED_ATTR)) return;
 
-            var rect = el.getBoundingClientRect();
-            var threshold = Math.max(48, Math.min(180, Math.round(viewport.height * 0.16)));
-
-            // Clear repair if element is now naturally healthy
-            if (rect.height > threshold && el.scrollHeight <= rect.height + 50) {
-              clearRepair(el);
-            }
+            try {
+              var style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden') {
+                clearRepair(el);
+              }
+            } catch (e) {}
           }
 
           function scanAndRepair() {
@@ -223,9 +226,14 @@ object HermesWebUiScripts {
                 continue;
               }
 
-              // Check if previously repaired element is now healthy
+              // Retain a repair while the element remains visible. Its measured height
+              // includes this repair, so clearing it based on the current layout would
+              // re-enable the broken vh/dvh rule and make the panel oscillate.
               if (el.getAttribute(REPAIRED_ATTR)) {
-                clearRepairIfHealthy(el, viewport);
+                clearRepairIfHidden(el);
+                if (el.getAttribute(REPAIRED_ATTR)) {
+                  updateRepair(el, viewport);
+                }
                 continue;
               }
 

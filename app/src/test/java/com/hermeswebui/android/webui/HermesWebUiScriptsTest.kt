@@ -74,6 +74,16 @@ class HermesWebUiScriptsTest {
     }
 
     @Test
+    fun `viewport fix script keeps visible repaired panels from oscillating`() {
+        val script = HermesWebUiScripts.viewportFixScript
+
+        assertThat(script).contains("function updateRepair(el, viewport)")
+        assertThat(script).contains("function clearRepairIfHidden(el)")
+        assertThat(script).contains("make the panel oscillate")
+        assertThat(script).doesNotContain("clearRepairIfHealthy")
+    }
+
+    @Test
     fun `viewport fix script includes baseline CSS for layout containers`() {
         val script = HermesWebUiScripts.viewportFixScript
 
