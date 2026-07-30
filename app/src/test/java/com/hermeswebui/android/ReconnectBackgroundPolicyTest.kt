@@ -6,106 +6,61 @@ import org.junit.Test
 
 class ReconnectBackgroundPolicyTest {
     @Test
-    fun `foreground service can run for trusted session activity without reconnecting`() {
+    fun `enabled foreground service runs continuously across activity visibility changes`() {
         assertThat(
             ReconnectBackgroundPolicy.shouldRunForegroundService(
-                backgroundReconnectEnabled = true,
-                activityVisible = false
-            )
-        ).isTrue()
-
-        assertThat(
-            ReconnectBackgroundPolicy.shouldRunForegroundService(
-                backgroundReconnectEnabled = true,
-                activityVisible = false
-            )
-        ).isTrue()
-
-        assertThat(
-            ReconnectBackgroundPolicy.shouldRunForegroundService(
-                backgroundReconnectEnabled = true,
-                activityVisible = true
-            )
-        ).isFalse()
-    }
-
-    @Test
-    fun `keepAlive follows toggle and visibility independently of reconnect state`() {
-        assertThat(
-            ReconnectBackgroundPolicy.shouldKeepAlive(
-                backgroundReconnectEnabled = true,
-                activityVisible = false
-            )
-        ).isTrue()
-
-        assertThat(
-            ReconnectBackgroundPolicy.shouldKeepAlive(
-                backgroundReconnectEnabled = false,
-                activityVisible = false
-            )
-        ).isFalse()
-
-        assertThat(
-            ReconnectBackgroundPolicy.shouldKeepAlive(
-                backgroundReconnectEnabled = true,
-                activityVisible = true
-            )
-        ).isFalse()
-
-        assertThat(
-            ReconnectBackgroundPolicy.shouldKeepAlive(
-                backgroundReconnectEnabled = true,
-                activityVisible = false
+                backgroundReconnectEnabled = true
             )
         ).isTrue()
     }
 
     @Test
-    fun `shouldCancelAutoRetryOnStop mirrors inverse keepAlive policy`() {
+    fun `disabled foreground service tears down`() {
+        assertThat(
+            ReconnectBackgroundPolicy.shouldRunForegroundService(
+                backgroundReconnectEnabled = false
+            )
+        ).isFalse()
+
+        assertThat(
+            ReconnectBackgroundPolicy.shouldKeepAlive(
+                backgroundReconnectEnabled = false
+            )
+        ).isFalse()
+    }
+
+    @Test
+    fun `activity stop preserves enabled monitoring and only disabled mode cancels retry`() {
+        assertThat(
+            ReconnectBackgroundPolicy.shouldKeepAlive(
+                backgroundReconnectEnabled = true
+            )
+        ).isTrue()
+        assertThat(
+            ReconnectBackgroundPolicy.shouldCancelAutoRetryOnStop(
+                backgroundReconnectEnabled = true
+            )
+        ).isFalse()
+        assertThat(
+            ReconnectBackgroundPolicy.shouldCancelAutoRetryOnStop(
+                backgroundReconnectEnabled = false
+            )
+        ).isTrue()
+    }
+
+    @Test
+    fun `foreground service policy depends only on the user toggle`() {
         val cases = listOf(
-            Triple(true, false, true),
-            Triple(false, false, true),
-            Triple(true, true, true),
-            Triple(true, false, false),
-            Triple(false, true, false)
+            true to true,
+            false to false
         )
 
-        cases.forEach { (enabled, visible, _) ->
-            val keepAlive = ReconnectBackgroundPolicy.shouldKeepAlive(
-                backgroundReconnectEnabled = enabled,
-                activityVisible = visible
-            )
-            val cancelAutoRetry = ReconnectBackgroundPolicy.shouldCancelAutoRetryOnStop(
-                backgroundReconnectEnabled = enabled,
-                activityVisible = visible
-            )
-            assertThat(cancelAutoRetry).isEqualTo(!keepAlive)
-        }
-    }
-
-    @Test
-    fun `foreground service parity stays derived from visibility reconnect toggle and session signals`() {
-        data class Case(
-            val enabled: Boolean,
-            val visible: Boolean,
-            val reconnecting: Boolean,
-            val expectedRun: Boolean
-        )
-
-        val cases = listOf(
-            Case(enabled = true, visible = false, reconnecting = true, expectedRun = true),
-            Case(enabled = true, visible = false, reconnecting = false, expectedRun = true),
-            Case(enabled = true, visible = true, reconnecting = true, expectedRun = false),
-            Case(enabled = false, visible = false, reconnecting = true, expectedRun = false)
-        )
-
-        cases.forEach { c ->
+        cases.forEach { (enabled, expectedRun) ->
             assertThat(
                 ReconnectBackgroundPolicy.shouldRunForegroundService(
-                    backgroundReconnectEnabled = c.enabled,
-                    activityVisible = c.visible
+                    backgroundReconnectEnabled = enabled
                 )
-            ).isEqualTo(c.expectedRun)
+            ).isEqualTo(expectedRun)
         }
     }
 }

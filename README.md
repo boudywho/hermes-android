@@ -164,8 +164,8 @@ Hermes-Android currently publishes through two release channels:
 
 Current checked-in release metadata:
 
-- Version name: `1.0.13`
-- Version code: `10013`
+- Version name: `1.0.14`
+- Version code: `10014`
 - Play application ID: `com.hermeswebui.android`
 - GitHub application ID: `com.hermeswebui.android.github`
 - Compile SDK / target SDK: `37`
@@ -254,12 +254,13 @@ bounded WebView back/forward state only when its current page still matches the
 configured trusted WebUI origin; deep links, notification taps, reset-session,
 and server switching take precedence.
 
-Background activity monitoring is opt-in. While enabled and Hermes is
-backgrounded, Android keeps a low-priority ongoing notification even when no
-session stream is available. It stops when Hermes returns to the foreground or
-the setting is disabled and never starts at boot. Android and OEM battery
-optimization and Android foreground-service time limits can still delay or stop
-background work despite the foreground service.
+Background activity monitoring is opt-in. While enabled, Android starts its
+low-priority ongoing foreground-service notification while Hermes is visible
+and retains the same monitor across foreground/background transitions, even
+when no session stream is available. It stops only when the setting is disabled
+and never starts at boot. Android 14+ classifies this persistent, user-visible
+remote session monitor as special use; older supported versions retain the
+data-sync fallback. OEM battery optimization can still affect background work.
 
 On Android 8 and 9, saving a WebUI `blob:` export to the public Downloads
 collection requires the platform storage permission; Android 10+ uses scoped

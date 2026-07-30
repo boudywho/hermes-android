@@ -18,14 +18,22 @@ class HermesWebUiScriptsTest {
     }
 
     @Test
-    fun `theme bridge observes theme meta and emits canonical opaque colors`() {
+    fun `theme bridge follows authenticated theme with low overhead observers`() {
         val script = HermesWebUiScripts.themeColorScript
 
         assertThat(script).contains("window.top !== window")
-        assertThat(script).contains("meta[name=\"theme-color\"]")
-        assertThat(script).contains("MutationObserver")
-        assertThat(script).contains("discovery?.disconnect()")
-        assertThat(script).contains("metaObserver.observe(meta, { attributes: true, attributeFilter: [\"content\"] })")
+        assertThat(script).contains("meta#hermes-theme-color[name=\"theme-color\"]")
+        assertThat(script).contains("getPropertyValue(\"--sidebar\")")
+        assertThat(script).contains("rootObserver.observe(observedRoot")
+        assertThat(script).contains("attributeFilter: [\"class\", \"data-skin\", \"style\"]")
+        assertThat(script).contains("headObserver.observe(observedHead")
+        assertThat(script).contains("requestAnimationFrame(sample)")
+        assertThat(script).contains("window.addEventListener(\"pageshow\", scheduleSample)")
+        assertThat(script).contains("[50, 250, 1000, 2500]")
+        assertThat(script).doesNotContain("discovery?.disconnect()")
+        assertThat(script).doesNotContain("observe(document, { childList: true, subtree: true })")
+        assertThat(script).doesNotContain("document.body, { childList: true, subtree: true")
+        assertThat(script).doesNotContain("setInterval")
         assertThat(script).contains("pixel[3] !== 255")
         assertThat(script).contains("theme_color")
     }

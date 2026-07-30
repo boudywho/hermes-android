@@ -75,11 +75,14 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.content.FileProvider
@@ -213,6 +216,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var foregroundServiceCoordinator: HermesForegroundServiceCoordinator
     private lateinit var blobDownloadCoordinator: HermesBlobDownloadCoordinator
     private lateinit var themeColorCoordinator: HermesThemeColorCoordinator
+    private val webUiChromeColor = mutableIntStateOf(ThemeColorPolicy.DEFAULT_COLOR)
     private var webViewStateInvalidated = false
     private val appUpdateDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -319,7 +323,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        activityVisible = true
 
         // Begin logcat capture to an app-private file BEFORE any other onCreate
         // work, so a crash or permission denial during startup is still captured.
@@ -493,7 +496,7 @@ class MainActivity : ComponentActivity() {
         if (::webView.isInitialized) {
             activityVisible = true
             viewModel.refreshFeatureFlagsFromRepository()
-            foregroundServiceCoordinator.onActivityResumed()
+            foregroundServiceCoordinator.onActivityResumed(viewModel.uiState.value)
             viewModel.onAppForegrounded()
             updateWebNotificationPermissionState()
             appUpdateCoordinator.resumePendingGitHubInstallIfReady()
@@ -519,7 +522,7 @@ class MainActivity : ComponentActivity() {
         activityVisible = false
         appUpdateCoordinator.cancelAutomaticAppUpdateCheck()
         val state = viewModel.uiState.value
-        foregroundServiceCoordinator.onActivityStopped(state, activityVisible)
+        foregroundServiceCoordinator.onActivityStopped(state)
         // Clean up any lingering OAuth popup on app stop.
         cleanupExpiredOAuthPopup()
     }
@@ -651,10 +654,18 @@ class MainActivity : ComponentActivity() {
             if (isDark) HermesDarkColorScheme else HermesLightColorScheme
         }
         MaterialTheme(colorScheme = colorScheme) {
+            val outerChromeColor = if (uiState.isSettingsVisible) {
+                MaterialTheme.colorScheme.background
+            } else {
+                Color(webUiChromeColor.intValue)
+            }
+            SideEffect {
+                applySystemBarChrome(outerChromeColor.toArgb())
+            }
             Box(modifier = Modifier.fillMaxSize()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = outerChromeColor
                 ) {
                     Box(
                         modifier = Modifier
@@ -1612,14 +1623,21 @@ class MainActivity : ComponentActivity() {
         if (!::webView.isInitialized) return
         runOnUiThread {
             if (isDestroyed) return@runOnUiThread
+            webUiChromeColor.intValue = color
             webView.setBackgroundColor(color)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applySystemBarChrome(color: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             window.statusBarColor = color
             window.navigationBarColor = color
-            WindowCompat.getInsetsController(window, window.decorView).apply {
-                val darkIcons = ThemeColorPolicy.useDarkIcons(color)
-                isAppearanceLightStatusBars = darkIcons
-                isAppearanceLightNavigationBars = darkIcons
-            }
+        }
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            val darkIcons = ThemeColorPolicy.useDarkIcons(color)
+            isAppearanceLightStatusBars = darkIcons
+            isAppearanceLightNavigationBars = darkIcons
         }
     }
 

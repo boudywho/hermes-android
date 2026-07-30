@@ -32,8 +32,8 @@
     <string name="debug_logging_notification_body">Capturing troubleshooting logs in the background. Tap Stop to end capture.</string>
     <string name="debug_logging_notification_stop_action">Stop</string>
     <string name="settings_background_activity_title">Background activity monitoring</string>
-    <string name="settings_background_activity_description">Keep Hermes active while this app is backgrounded and show safe activity updates when available.</string>
-    <string name="settings_background_activity_battery_note">Android foreground-service limits or device battery optimization may still delay or stop background updates. Hermes does not start at boot and respects system controls.</string>
+    <string name="settings_background_activity_description">Keep Hermes session monitoring active with an ongoing notification, including while this app is backgrounded.</string>
+    <string name="settings_background_activity_battery_note">Android system controls or device battery optimization may still delay or stop background updates. Hermes does not start at boot and respects system controls.</string>
     <string name="settings_sse_transport_description">Beta: uses Hermes SSE endpoints for foreground reconnect detection and falls back to polling.</string>
     <string name="settings_sse_transport_note">This beta reconnect option is separate from Background activity monitoring, which attempts the authenticated current-session stream automatically when available.</string>
 </resources>

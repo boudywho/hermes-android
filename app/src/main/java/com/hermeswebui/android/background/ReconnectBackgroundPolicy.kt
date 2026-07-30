@@ -2,26 +2,22 @@ package com.hermeswebui.android.background
 
 internal object ReconnectBackgroundPolicy {
     internal fun shouldRunForegroundService(
-        backgroundReconnectEnabled: Boolean,
-        activityVisible: Boolean
+        backgroundReconnectEnabled: Boolean
     ): Boolean {
-        return backgroundReconnectEnabled && !activityVisible
+        return backgroundReconnectEnabled
     }
 
     internal fun shouldKeepAlive(
-        backgroundReconnectEnabled: Boolean,
-        activityVisible: Boolean
+        backgroundReconnectEnabled: Boolean
     ): Boolean {
-        return backgroundReconnectEnabled && !activityVisible
+        return backgroundReconnectEnabled
     }
 
     internal fun shouldCancelAutoRetryOnStop(
-        backgroundReconnectEnabled: Boolean,
-        activityVisible: Boolean
+        backgroundReconnectEnabled: Boolean
     ): Boolean {
         return !shouldKeepAlive(
-            backgroundReconnectEnabled = backgroundReconnectEnabled,
-            activityVisible = activityVisible
+            backgroundReconnectEnabled = backgroundReconnectEnabled
         )
     }
 }

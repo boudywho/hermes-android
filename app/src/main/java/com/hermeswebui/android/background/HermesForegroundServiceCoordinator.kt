@@ -12,8 +12,7 @@ class HermesForegroundServiceCoordinator(
     private val onCancelAutoRetry: () -> Unit,
     private val onSetDebugLoggingEnabled: (Boolean) -> Unit
 ) {
-    private var reconnectServiceRunning = false
-    private var reconnectCommand: ReconnectCommand? = null
+    private val reconnectDispatch = ReconnectForegroundServiceDispatch<ReconnectCommand>()
     private var debugLoggingServiceRunning = false
 
     fun onUiStateChanged(state: MainUiState, activityVisible: Boolean) {
@@ -21,16 +20,15 @@ class HermesForegroundServiceCoordinator(
         syncDebugLoggingForegroundService(state.debugLoggingEnabled)
     }
 
-    fun onActivityResumed() {
-        stopReconnectForegroundService()
+    fun onActivityResumed(state: MainUiState) {
+        syncReconnectForegroundService(state, activityVisible = true)
     }
 
-    fun onActivityStopped(state: MainUiState, activityVisible: Boolean) {
-        syncReconnectForegroundService(state, activityVisible)
+    fun onActivityStopped(state: MainUiState) {
+        syncReconnectForegroundService(state, activityVisible = false)
         if (
             ReconnectBackgroundPolicy.shouldCancelAutoRetryOnStop(
-                backgroundReconnectEnabled = state.backgroundReconnectEnabled,
-                activityVisible = activityVisible
+                backgroundReconnectEnabled = state.backgroundReconnectEnabled
             )
         ) {
             onCancelAutoRetry()
@@ -38,17 +36,14 @@ class HermesForegroundServiceCoordinator(
     }
 
     private fun syncReconnectForegroundService(state: MainUiState, activityVisible: Boolean) {
-        val sessionId = ReconnectSessionStreamSupport.sessionIdFromUrl(state.currentUrl)
-        if (
-            !ReconnectBackgroundPolicy.shouldRunForegroundService(
-                backgroundReconnectEnabled = state.backgroundReconnectEnabled,
-                activityVisible = activityVisible
-            )
-        ) {
+        if (!state.backgroundReconnectEnabled) {
             stopReconnectForegroundService()
             return
         }
+        if (!activityVisible) return
+
         try {
+            val sessionId = ReconnectSessionStreamSupport.sessionIdFromUrl(state.currentUrl)
             val sessionTargetUrl = state.currentUrl.takeIf(isTrustedNotificationTarget)
             val cookieHeader = CookieManager.getInstance().getCookie(state.settings.serverUrl)
             val nextCommand = ReconnectCommand(
@@ -60,7 +55,15 @@ class HermesForegroundServiceCoordinator(
                 isReconnecting = state.isReconnecting,
                 showFullTextOnLockScreen = state.backgroundActivityFullTextEnabled
             )
-            if (reconnectServiceRunning && reconnectCommand == nextCommand) return
+            if (
+                reconnectDispatch.action(
+                    enabled = true,
+                    activityVisible = true,
+                    command = nextCommand
+                ) == ReconnectForegroundServiceDispatch.Action.NONE
+            ) {
+                return
+            }
             HermesReconnectService.start(
                 context,
                 pollIntervalSeconds = state.reconnectPollIntervalSeconds,
@@ -71,23 +74,23 @@ class HermesForegroundServiceCoordinator(
                 isReconnecting = state.isReconnecting,
                 showFullTextOnLockScreen = state.backgroundActivityFullTextEnabled
             )
-            reconnectServiceRunning = true
-            reconnectCommand = nextCommand
+            reconnectDispatch.onStartOrUpdateSucceeded(nextCommand)
         } catch (_: IllegalStateException) {
-            reconnectServiceRunning = false
-            reconnectCommand = null
-            onCancelAutoRetry()
+            handleReconnectStartOrUpdateFailure()
         } catch (_: SecurityException) {
-            reconnectServiceRunning = false
-            reconnectCommand = null
+            handleReconnectStartOrUpdateFailure()
+        }
+    }
+
+    private fun handleReconnectStartOrUpdateFailure() {
+        if (reconnectDispatch.onStartOrUpdateFailed()) {
             onCancelAutoRetry()
         }
     }
 
     private fun stopReconnectForegroundService() {
         HermesReconnectService.stop(context)
-        reconnectServiceRunning = false
-        reconnectCommand = null
+        reconnectDispatch.onStopped()
     }
 
     private fun syncDebugLoggingForegroundService(debugLoggingEnabled: Boolean) {

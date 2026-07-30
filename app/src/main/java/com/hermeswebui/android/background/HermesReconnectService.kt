@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.webkit.CookieManager
@@ -109,7 +108,7 @@ class HermesReconnectService : Service() {
             startForeground(
                 RECONNECT_NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                ReconnectForegroundServiceTypePolicy.foregroundServiceType(Build.VERSION.SDK_INT)
             )
         } else {
             startForeground(RECONNECT_NOTIFICATION_ID, notification)

@@ -121,16 +121,14 @@ object HermesWebUiScripts {
           if (!bridge || typeof bridge.postMessage !== "function") return;
           window.__hermesAndroidThemeColorInstalled = true;
           let lastColor = null;
-          let observedMeta = null;
-          let metaObserver = null;
-          let discovery = null;
-          const findMeta = () => document.querySelector('meta[name="theme-color"]');
+          let sampleFrame = 0;
+          let observedHead = null;
+          let headObserver = null;
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
           const normalize = (raw) => {
-            if (typeof raw !== "string" || !CSS.supports("color", raw)) return null;
-            const canvas = document.createElement("canvas");
-            canvas.width = canvas.height = 1;
-            const context = canvas.getContext("2d", { willReadFrequently: true });
-            if (!context) return null;
+            if (!context || typeof raw !== "string" || !CSS.supports("color", raw)) return null;
             context.clearRect(0, 0, 1, 1);
             context.fillStyle = raw;
             context.fillRect(0, 0, 1, 1);
@@ -147,33 +145,80 @@ object HermesWebUiScripts {
             lastColor = color;
             bridge.postMessage(JSON.stringify({ type: "theme_color", color }));
           };
-          const publishMeta = () => {
-            const meta = findMeta();
-            if (!meta) return false;
-            discovery?.disconnect();
-            discovery = null;
-            if (meta !== observedMeta) {
-              metaObserver?.disconnect();
-              observedMeta = meta;
-              metaObserver = new MutationObserver(publishMeta);
-              metaObserver.observe(meta, { attributes: true, attributeFilter: ["content"] });
+          const findThemeMeta = () => {
+            const canonical = document.querySelector(
+              'meta#hermes-theme-color[name="theme-color"]'
+            );
+            if (canonical) return canonical;
+            const candidates = document.querySelectorAll('meta[name="theme-color"]');
+            for (const meta of candidates) {
+              const media = meta.getAttribute("media");
+              if (!media || window.matchMedia(media).matches) return meta;
             }
-            publish(meta.getAttribute("content"));
-            return true;
+            return candidates[0] || null;
           };
-          discovery = new MutationObserver(publishMeta);
-          discovery.observe(document, { childList: true, subtree: true });
-          const finishDiscovery = () => {
-            if (!publishMeta() && document.body) {
-              publish(getComputedStyle(document.body).backgroundColor);
+          const activeChromeColor = () => {
+            const root = document.documentElement;
+            if (root) {
+              const sidebar = getComputedStyle(root).getPropertyValue("--sidebar").trim();
+              if (sidebar) return sidebar;
             }
+            const meta = findThemeMeta();
+            if (meta) return meta.getAttribute("content");
+            return document.body ? getComputedStyle(document.body).backgroundColor : null;
+          };
+          const bindHeadObserver = () => {
+            if (document.head === observedHead) return;
+            headObserver?.disconnect();
+            observedHead = document.head;
+            if (!observedHead) return;
+            headObserver = new MutationObserver(scheduleSample);
+            headObserver.observe(observedHead, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              attributeFilter: ["content", "id", "name", "media"]
+            });
+          };
+          const sample = () => {
+            sampleFrame = 0;
+            bindRootObserver();
+            bindHeadObserver();
+            publish(activeChromeColor());
+          };
+          function scheduleSample() {
+            if (sampleFrame) return;
+            sampleFrame = requestAnimationFrame(sample);
+          }
+          const rootObserver = new MutationObserver(scheduleSample);
+          let observedRoot = null;
+          function bindRootObserver() {
+            if (document.documentElement === observedRoot) return;
+            rootObserver.disconnect();
+            observedRoot = document.documentElement;
+            if (!observedRoot) return;
+            rootObserver.observe(observedRoot, {
+              attributes: true,
+              attributeFilter: ["class", "data-skin", "style"],
+              childList: true
+            });
+          }
+          bindRootObserver();
+          const sampleAfterDomReady = () => {
+            scheduleSample();
+            [50, 250, 1000, 2500].forEach(
+              delay => window.setTimeout(scheduleSample, delay)
+            );
           };
           if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", finishDiscovery, { once: true });
+            document.addEventListener("DOMContentLoaded", sampleAfterDomReady, { once: true });
           } else {
-            finishDiscovery();
+            sampleAfterDomReady();
           }
-          publishMeta();
+          window.addEventListener("pageshow", scheduleSample);
+          window.addEventListener("focus", scheduleSample);
+          window.addEventListener("storage", scheduleSample);
+          scheduleSample();
         })();
     """.trimIndent()
 
