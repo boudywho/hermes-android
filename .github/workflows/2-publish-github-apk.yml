@@ -56,7 +56,7 @@ jobs:
 
     steps:
       - name: Download GitHub APK artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ${{ inputs.artifact_name }}
           path: build/release
@@ -72,6 +72,12 @@ jobs:
             find build/release -maxdepth 1 -type f -print
             exit 1
           fi
+          checksum_count="$(find build/release -maxdepth 1 -type f -name 'hermes-webui-v*-github.apk.sha256' | wc -l | tr -d ' ')"
+          if [ "$checksum_count" != "1" ]; then
+            echo "Expected exactly one APK checksum sidecar, found $checksum_count."
+            exit 1
+          fi
+          (cd build/release && sha256sum --check --strict *.apk.sha256)
 
       - name: Build release notes body
         shell: bash
@@ -118,13 +124,43 @@ jobs:
           RELEASE_COMMIT: ${{ inputs.commit_sha }}
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" \
+            existing_commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')"
+            test "$existing_commit" = "$RELEASE_COMMIT" || {
+              echo "Existing immutable release targets $existing_commit, expected $RELEASE_COMMIT."
+              exit 1
+            }
+            existing_asset_count="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.assets | length')"
+            test "$existing_asset_count" = "2" || {
+              echo "Existing immutable release has $existing_asset_count assets; expected exactly the APK and checksum sidecar."
+              exit 1
+            }
+            temp_dir="$(mktemp -d)"
+            trap 'rm -rf "$temp_dir"' EXIT
+            gh release download "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$RELEASE_COMMIT" \
-              --notes-file build/release/release-notes.md
-            gh release upload "$RELEASE_TAG" build/release/*.apk --repo "$GITHUB_REPOSITORY" --clobber
+              --dir "$temp_dir" \
+              --pattern 'hermes-webui-v*-github.apk' \
+              --pattern 'hermes-webui-v*-github.apk.sha256'
+            existing_apk_count="$(find "$temp_dir" -maxdepth 1 -type f -name '*.apk' | wc -l | tr -d ' ')"
+            existing_checksum_count="$(find "$temp_dir" -maxdepth 1 -type f -name '*.apk.sha256' | wc -l | tr -d ' ')"
+            test "$existing_apk_count" = "1" && test "$existing_checksum_count" = "1" || {
+              echo "Existing release does not contain exactly one APK and checksum sidecar."
+              exit 1
+            }
+            (cd "$temp_dir" && sha256sum --check --strict *.apk.sha256)
+            local_sha="$(sha256sum build/release/*.apk | awk '{print $1}')"
+            existing_sha="$(sha256sum "$temp_dir"/*.apk | awk '{print $1}')"
+            test "$local_sha" = "$existing_sha" || {
+              echo "Existing immutable APK does not match this build."
+              exit 1
+            }
+            cmp -s build/release/*.apk.sha256 "$temp_dir"/*.apk.sha256 || {
+              echo "Existing immutable checksum sidecar does not match this build."
+              exit 1
+            }
+            echo "Existing release target and assets match; leaving the immutable release unchanged."
           else
-            gh release create "$RELEASE_TAG" build/release/*.apk \
+            gh release create "$RELEASE_TAG" build/release/*.apk build/release/*.apk.sha256 \
               --repo "$GITHUB_REPOSITORY" \
               --target "$RELEASE_COMMIT" \
               --title "Hermes WebUI Android $RELEASE_TAG" \

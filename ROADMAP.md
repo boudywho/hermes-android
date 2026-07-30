@@ -3,7 +3,7 @@
 > Maintenance-focused Android wrapper for Hermes Web UI. The core wrapper is
 > good as-is; product UI and workflow changes belong in Hermes WebUI.
 >
-> Last updated: 2026-07-25
+> Last updated: 2026-07-30
 
 ---
 
@@ -16,7 +16,9 @@
 | WebView compatibility | Done - disables forced darkening, patches Android viewport-unit collapse, respects system-bar safe insets, uses browser-managed cache defaults, smooths reload rendering, restores touch-and-hold context-menu dispatch for conversation actions, and forces WebUI microphone input onto the Android-compatible MediaRecorder path |
 | Official dashboard link | Done - Android no longer writes WebUI's Official Hermes Dashboard config, opens explicitly configured dashboard-origin requests in a Chrome Custom Tab with minimal browser UI, and avoids persisting dashboard pages as startup state |
 | Android sharing | Done - share-to-app intake for text and files |
-| Files | Done - WebView upload/download integration |
+| Files | Done - WebView upload/download integration, including bounded trusted blob-export streaming to MediaStore Downloads |
+| Native theme integration | Done - exact-origin WebUI theme-color observation synchronizes WebView and Android system chrome |
+| Activity recreation | Done - bounded trusted WebView back/forward state restoration with deep-link/reset/profile precedence |
 | Microphone | Done - allowlisted WebView audio capture with Android runtime permission plus WebUI MediaRecorder fallback |
 | Local settings | Done - encrypted settings storage |
 | Native navigation | Done - WebUI-owned dashboard link integration and deep links |
@@ -115,7 +117,7 @@ sketches are captured inline below.
 | M-002 | As needed | Open | Security | Keep WebView, URL policy, permissions, and encrypted settings behavior hardened | Preserve HTTP/HTTPS configured-host support and host allowlist enforcement |
 | M-003 | As needed | Open | Bugfix | Fix Android-wrapper regressions | Scope to WebView hosting, permissions, share/download, notifications, deep links, settings, and release flow |
 | M-004 | As needed | Open | Release | Keep signed release automation current | Maintain alignment between Gradle metadata, `keystore.properties.example`, and GitHub Actions secrets |
-| M-005 | High | In progress | Platform | Triage and stage Issue 10 background-execution work (A/B/C phases) | Part A is complete, Part B ongoing activity updates are implemented (with reconnect using `/api/sessions/events` plus polling fallback), and initial Part C tray approvals are implemented with queue-head validation through `/api/approval/pending` before `/api/approval/respond`; remaining scope is B4 lifecycle/manual validation plus broader cross-client payload/API contract hardening |
+| M-005 | High | In progress | Platform | Triage and stage Issue 10 background-execution work (A/B/C phases) | Foreground monitoring now remains passive without a session/stream, is sticky across eligible process restart, retries authenticated session SSE with bounded backoff, and retains fail-closed tray approvals. Remaining scope is device/OEM lifecycle validation and broader cross-client payload/API contract hardening. |
 | UX-002 | Medium | Done | Settings | Server health check before switching | Tapping a saved non-current server now probes readiness first, shows reachable/auth-required/setup/offline/non-Hermes status, asks for confirmation before switching, blocks unsafe switches by default, and records safe diagnostic breadcrumbs for the check result |
 | A-020-P2 | Medium | Open | Settings | Multi-server profile storage (Issue #20 Phase 2) | Add encrypted multi-server profile persistence in `SettingsRepository` with versioned migration; extend `SettingsBottomSheet` UI with profile list, add/edit/delete dialogs, and active server selector |
 | A-020-P3 | Medium | Open | Navigation | Multi-server profile switching (Issue #20 Phase 3) | Implement profile activation flow: reload WebView with new server, clear old session/cookies, validate new server against allowlist, update dashboard config, run comprehensive profile CRUD and switching tests |
@@ -228,3 +230,4 @@ sketches are captured inline below.
 | BUG-034 | 2026-07-25 | Updates / Connectivity | Refined VPN/update recovery UX: while VPN guard blocks a Tailscale server, Hermes keeps a short-timeout `/api/status` probe running every second across the Tailscale app handoff, then auto-resumes pending server load only after VPN transport and the server are both ready. It sends Tailscale's exported `com.tailscale.ipn.CONNECT_VPN` broadcast as a best-effort auto-connect trigger before app/settings fallback. GitHub update flow now preserves an explicit in-app `Check -> Download -> Install` button progression and no longer auto-launches installer immediately on foreground download completion. |
 | BUG-035 | 2026-07-25 | Connectivity | Fixed Tailscale recovery: Hermes now asks Tailscale to connect while remaining visible, retries the pending server load automatically, and only opens Tailscale/VPN settings after a 10-second auto-connect grace period. It dismisses Settings and reloads Hermes once VPN plus server are ready, posts a ready notification when the fallback app remains foregrounded, and routes pull-to-refresh, Retry, reconnect events, and current-server taps through the VPN-aware loader. |
 | BUG-036 | 2026-07-28 | Android compatibility | Fixed approval gates and quoted approval context repeatedly expanding and collapsing in Android WebView by retaining generic viewport repairs while the affected panel remains visible; the repair now refreshes on viewport changes and releases only after the panel is hidden. |
+| MILESTONE-037 | 2026-07-30 | Android integration | Added exact-origin blob export streaming, live WebUI theme chrome, bounded trusted WebView state restoration, durable opt-in passive background monitoring with session-stream retries, and hardened CI/release verification with pinned actions, signer checks, checksums, and immutable release behavior. |

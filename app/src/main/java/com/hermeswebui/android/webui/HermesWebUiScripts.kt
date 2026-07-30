@@ -3,6 +3,180 @@ package com.hermeswebui.android.webui
 import org.json.JSONObject
 
 object HermesWebUiScripts {
+    val blobDownloadScript = """
+        (() => {
+          if (window.top !== window || window.__hermesAndroidBlobDownloadsInstalled) return;
+          const bridge = window.HermesAndroidBlobDownloads;
+          if (!bridge || typeof bridge.postMessage !== "function") return;
+          window.__hermesAndroidBlobDownloadsInstalled = true;
+          const pending = new Map();
+          bridge.onmessage = (event) => {
+            let message;
+            try { message = JSON.parse(event.data); } catch (_) { return; }
+            if (!message || message.type !== "status" || typeof message.id !== "string") return;
+            const waiter = pending.get(message.id);
+            if (!waiter || (waiter.sequence !== undefined && waiter.sequence !== message.sequence)) return;
+            pending.delete(message.id);
+            clearTimeout(waiter.timer);
+            waiter.resolve(message);
+          };
+          const send = (message, sequence) => new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              pending.delete(message.id);
+              reject(new Error("Native download timed out"));
+            }, 15000);
+            pending.set(message.id, { resolve, reject, timer, sequence });
+            try { bridge.postMessage(JSON.stringify(message)); }
+            catch (error) {
+              clearTimeout(timer);
+              pending.delete(message.id);
+              reject(error);
+            }
+          });
+          const encode = (buffer) => {
+            const bytes = new Uint8Array(buffer);
+            let binary = "";
+            for (let offset = 0; offset < bytes.length; offset += 8192) {
+              binary += String.fromCharCode.apply(
+                null, bytes.subarray(offset, offset + 8192));
+            }
+            return btoa(binary);
+          };
+          const notify = (detail) =>
+            window.dispatchEvent(new CustomEvent("hermesnativedownload", { detail }));
+          const transfer = async (url, filename) => {
+            const random = new Uint8Array(16);
+            crypto.getRandomValues(random);
+            const id = Array.from(
+              random, value => value.toString(16).padStart(2, "0")).join("");
+            let started = false;
+            try {
+              const response = await fetch(url);
+              if (!response.ok) throw new Error("Blob could not be read");
+              const blob = await response.blob();
+              let status = await send({
+                type: "start",
+                id,
+                filename: filename || "hermes-download",
+                mime: blob.type || "application/octet-stream",
+                size: blob.size
+              });
+              if (status.status !== "started") throw new Error("Download rejected");
+              started = true;
+              notify({ id, status: "started" });
+              let sequence = 0;
+              for (let offset = 0; offset < blob.size; offset += 65536) {
+                const data = encode(await blob.slice(offset, offset + 65536).arrayBuffer());
+                status = await send({ type: "chunk", id, sequence, data }, sequence);
+                if (status.status !== "ack") throw new Error("Download failed");
+                sequence += 1;
+              }
+              status = await send({ type: "finish", id });
+              if (status.status !== "success") throw new Error("Download failed");
+              notify({ id, status: "success", filename: status.filename || "" });
+            } catch (error) {
+              if (started) {
+                try { bridge.postMessage(JSON.stringify({ type: "abort", id })); } catch (_) {}
+              }
+              notify({
+                id,
+                status: "error",
+                message: error instanceof Error ? error.message : "Download failed"
+              });
+            }
+          };
+          const originalClick = HTMLAnchorElement.prototype.click;
+          HTMLAnchorElement.prototype.click = function() {
+            const filename = this.getAttribute("download");
+            if (filename !== null) {
+              try {
+                const url = new URL(this.href);
+                if (url.protocol === "blob:") {
+                  transfer(url.href, filename);
+                  return;
+                }
+              } catch (_) {}
+            }
+            return originalClick.call(this);
+          };
+          document.addEventListener("click", (event) => {
+            if (!event.isTrusted || event.defaultPrevented || event.button !== 0) return;
+            const element = event.target instanceof Element ? event.target : null;
+            const anchor = element?.closest("a[download]");
+            if (!(anchor instanceof HTMLAnchorElement)) return;
+            if (anchor.target && anchor.target !== "_self" && anchor.target !== "_top") return;
+            let url;
+            try { url = new URL(anchor.href); } catch (_) { return; }
+            if (url.protocol !== "blob:") return;
+            event.preventDefault();
+            transfer(url.href, anchor.getAttribute("download") || "hermes-download");
+          }, true);
+        })();
+    """.trimIndent()
+
+    val themeColorScript = """
+        (() => {
+          if (window.top !== window || window.__hermesAndroidThemeColorInstalled) return;
+          const bridge = window.HermesAndroidThemeColor;
+          if (!bridge || typeof bridge.postMessage !== "function") return;
+          window.__hermesAndroidThemeColorInstalled = true;
+          let lastColor = null;
+          let observedMeta = null;
+          let metaObserver = null;
+          let discovery = null;
+          const findMeta = () => document.querySelector('meta[name="theme-color"]');
+          const normalize = (raw) => {
+            if (typeof raw !== "string" || !CSS.supports("color", raw)) return null;
+            const canvas = document.createElement("canvas");
+            canvas.width = canvas.height = 1;
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            if (!context) return null;
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = raw;
+            context.fillRect(0, 0, 1, 1);
+            const pixel = context.getImageData(0, 0, 1, 1).data;
+            if (pixel[3] !== 255) return null;
+            return "#" + Array.from(
+              pixel.slice(0, 3),
+              value => value.toString(16).padStart(2, "0")
+            ).join("").toUpperCase();
+          };
+          const publish = (raw) => {
+            const color = normalize(raw);
+            if (!color || color === lastColor) return;
+            lastColor = color;
+            bridge.postMessage(JSON.stringify({ type: "theme_color", color }));
+          };
+          const publishMeta = () => {
+            const meta = findMeta();
+            if (!meta) return false;
+            discovery?.disconnect();
+            discovery = null;
+            if (meta !== observedMeta) {
+              metaObserver?.disconnect();
+              observedMeta = meta;
+              metaObserver = new MutationObserver(publishMeta);
+              metaObserver.observe(meta, { attributes: true, attributeFilter: ["content"] });
+            }
+            publish(meta.getAttribute("content"));
+            return true;
+          };
+          discovery = new MutationObserver(publishMeta);
+          discovery.observe(document, { childList: true, subtree: true });
+          const finishDiscovery = () => {
+            if (!publishMeta() && document.body) {
+              publish(getComputedStyle(document.body).backgroundColor);
+            }
+          };
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", finishDiscovery, { once: true });
+          } else {
+            finishDiscovery();
+          }
+          publishMeta();
+        })();
+    """.trimIndent()
+
     /**
      * Hybrid Viewport Polyfill for Android WebView
      *

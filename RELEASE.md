@@ -11,8 +11,7 @@ Use this checklist when publishing a new Hermes-Android build.
 3. Verify the change locally when code changed:
 
 ```powershell
-.\gradlew.bat test --no-daemon
-.\gradlew.bat assembleDebug --no-daemon
+.\gradlew.bat clean testDebugUnitTest lintDebug compileDebugAndroidTestKotlin assembleDebug --no-daemon
 ```
 
 4. Confirm release docs are current when release behavior changed.
@@ -28,12 +27,17 @@ Run the GitHub Actions workflow:
 That workflow:
 
 1. For manual runs, commits the next app version to `main`.
+1. Validates the Gradle wrapper JAR and verifies the downloaded Gradle distribution against its pinned SHA-256.
+1. Runs unit tests, lint, and Android-test Kotlin compilation.
 1. Builds and signs `hermes-webui-v<version>-github.apk`.
+1. Verifies exactly one signer and the expected public release certificate SHA-256.
+1. Generates `hermes-webui-v<version>-github.apk.sha256`.
 1. Builds and signs `hermes-webui-v<version>.aab`.
 1. Uploads both files as workflow artifacts.
 1. Publishes the GitHub APK and Play production AAB in the same orchestration run.
 
-The GitHub publish workflow attaches only the `-github.apk` to the GitHub
+The GitHub publish workflow attaches the `-github.apk` and its `.sha256`
+sidecar to the GitHub
 Release and writes human-readable generated GitHub release notes grouped by
 `.github/release.yml`. Build diagnostics stay in the Actions job summary rather
 than the public release body. The Play publish workflow uploads only the `.aab`
@@ -71,7 +75,14 @@ target unless the build artifacts are missing or expired.
 - Release workflows use concurrency groups to avoid duplicate publishing for
   the same release ref or target version.
 - Build and publish workflows fail if they find anything other than exactly one
-  matching APK or AAB artifact.
+  matching APK/AAB and expected APK checksum sidecar.
+- The signed APK must have exactly one signer whose public certificate SHA-256
+  is `2eb2a635706fee7cc32100e5d98614d0c8cd0bc3ee8cd96421a69ee6c1290242`.
+- Publishing verifies the sidecar after artifact download. Existing release
+  tags and assets are immutable: a retry leaves a matching release untouched
+  and fails if its target commit, APK, or checksum differs.
+- Decoded signing and Play service-account files use restrictive permissions
+  and are removed on failure and at job completion.
 - GitHub Releases use human-readable generated GitHub release notes; Play Store
   releases use a shorter `en-US` What's New changelog generated from the same
   notes.

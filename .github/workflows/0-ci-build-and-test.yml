@@ -19,13 +19,13 @@ permissions:
 
 jobs:
   build:
-    name: Unit tests + debug build
+    name: Tests, lint + debug build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 current
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4 current
         with:
           distribution: temurin
           java-version: "17"
@@ -34,18 +34,26 @@ jobs:
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947 # v4.4.3
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
-      - name: Unit tests
-        run: ./gradlew --no-daemon testDebugUnitTest
-
-      - name: Assemble debug APK
-        run: ./gradlew --no-daemon assembleDebug
+      - name: Verify debug build
+        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug compileDebugAndroidTestKotlin assembleDebug
 
       - name: Upload debug APK
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 current
         with:
           name: hermes-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+
+      - name: Upload verification reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 current
+        with:
+          name: hermes-debug-verification-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
           if-no-files-found: ignore

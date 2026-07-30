@@ -60,6 +60,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.hermeswebui.android.R
 import com.hermeswebui.android.data.ServerProfile
 import com.hermeswebui.android.ui.ServerValidationUiState
 import kotlin.math.roundToInt
@@ -452,14 +454,14 @@ fun SettingsScreen(
                         ListItem(
                             headlineContent = {
                                 Text(
-                                    "Background activity notification",
+                                    stringResource(R.string.settings_background_activity_title),
                                     color = onSurface,
                                     fontWeight = FontWeight.Medium
                                 )
                             },
                             supportingContent = {
                                 Text(
-                                    "Show the latest safe Hermes session activity while the app is backgrounded",
+                                    stringResource(R.string.settings_background_activity_description),
                                     color = onSurfaceVar,
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -480,6 +482,12 @@ fun SettingsScreen(
                             modifier = Modifier.clickable {
                                 onSetBackgroundReconnect(!backgroundReconnectEnabled)
                             }
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_background_activity_battery_note),
+                            color = onSurfaceVar.copy(alpha = 0.72f),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
 
                         HorizontalDivider(color = outlineVar.copy(alpha = 0.5f))
@@ -828,7 +836,7 @@ fun SettingsScreen(
                                 },
                                 supportingContent = {
                                     Text(
-                                        text = "Beta: uses Hermes SSE endpoints for reconnect detection and falls back to polling if the server does not expose them.",
+                                        text = stringResource(R.string.settings_sse_transport_description),
                                         color = onSurfaceVar,
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -851,7 +859,7 @@ fun SettingsScreen(
                                 }
                             )
                             Text(
-                                text = "When you turn SSE transport on, Android checks support automatically. If support is unavailable, the toggle turns back off. Use 'Check SSE support now' for a manual re-check.",
+                                text = stringResource(R.string.settings_sse_transport_note),
                                 color = onSurfaceVar.copy(alpha = 0.72f),
                                 style = MaterialTheme.typography.labelSmall
                             )

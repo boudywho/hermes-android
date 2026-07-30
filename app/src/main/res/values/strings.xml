@@ -3,10 +3,17 @@
     <string name="default_server_url">https://hermes.example.com</string>
     <string name="default_dashboard_url"></string>
     <string name="action_edit_server_url">Edit server URL</string>
-    <string name="reconnect_notification_title">Hermes activity is running in the background</string>
-    <string name="reconnect_notification_body_activity">Watching the current Hermes session for safe activity updates.</string>
-    <string name="reconnect_notification_body_public_activity">Hermes is working in the background.</string>
+    <string name="blob_download_fallback_name">hermes-download</string>
+    <string name="blob_download_started">Export started</string>
+    <string name="blob_download_complete">Export saved to Downloads</string>
+    <string name="blob_download_failed">Could not save the export</string>
+    <string name="blob_download_storage_permission_required">Allow storage access, then try the export again</string>
+    <string name="reconnect_notification_title">Hermes is active</string>
+    <string name="reconnect_notification_body_activity">Hermes is active and monitoring for background activity.</string>
+    <string name="reconnect_notification_body_public_activity">Hermes is active in the background.</string>
     <string name="reconnect_notification_body_public_reconnecting">Hermes is trying to reconnect in the background.</string>
+    <string name="background_activity_channel_name">Hermes background activity</string>
+    <string name="background_activity_channel_description">Ongoing status while Hermes monitors activity in the background</string>
     <string name="approval_action_deny">Deny</string>
     <string name="approval_notification_invalid">Hermes approval action is no longer valid.</string>
     <string name="approval_notification_expired">This Hermes approval is no longer pending.</string>
@@ -24,4 +31,9 @@
     <string name="debug_logging_notification_title">Debug logging is running</string>
     <string name="debug_logging_notification_body">Capturing troubleshooting logs in the background. Tap Stop to end capture.</string>
     <string name="debug_logging_notification_stop_action">Stop</string>
+    <string name="settings_background_activity_title">Background activity monitoring</string>
+    <string name="settings_background_activity_description">Keep Hermes active while this app is backgrounded and show safe activity updates when available.</string>
+    <string name="settings_background_activity_battery_note">Android foreground-service limits or device battery optimization may still delay or stop background updates. Hermes does not start at boot and respects system controls.</string>
+    <string name="settings_sse_transport_description">Beta: uses Hermes SSE endpoints for foreground reconnect detection and falls back to polling.</string>
+    <string name="settings_sse_transport_note">This beta reconnect option is separate from Background activity monitoring, which attempts the authenticated current-session stream automatically when available.</string>
 </resources>

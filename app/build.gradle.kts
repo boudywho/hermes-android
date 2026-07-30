@@ -137,12 +137,12 @@ extensions.configure<ApplicationExtension>("android") {
             buildConfigField(
                 "String",
                 "GITHUB_RELEASES_API_URL",
-                "\"https://api.github.com/repos/hermes-webui/hermes-android/releases/latest\""
+                "\"https://api.github.com/repos/boudywho/hermes-android/releases/latest\""
             )
             buildConfigField(
                 "String",
                 "GITHUB_RELEASES_PAGE_URL",
-                "\"https://github.com/hermes-webui/hermes-android/releases/latest\""
+                "\"https://github.com/boudywho/hermes-android/releases/latest\""
             )
         }
         debug {

@@ -50,7 +50,7 @@ jobs:
           test -n "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" || { echo "Missing GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64"; exit 1; }
 
       - name: Download Play AAB artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ${{ inputs.artifact_name }}
           path: build/release
@@ -70,9 +70,13 @@ jobs:
       - name: Decode Google Play service account
         shell: bash
         run: |
+          umask 077
+          trap 'rm -f signing/google-play-service-account.json' ERR
           mkdir -p signing
-          echo "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" | base64 --decode > signing/google-play-service-account.json
-          test -f signing/google-play-service-account.json || { echo "Google Play service account file was not created"; exit 1; }
+          printf '%s' "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" | base64 --decode > signing/google-play-service-account.json
+          chmod 600 signing/google-play-service-account.json
+          test -s signing/google-play-service-account.json || { echo "Google Play service account file was not created"; exit 1; }
+          trap - ERR
 
       - name: Build Play Store changelog
         shell: bash
@@ -148,7 +152,7 @@ jobs:
           cat build/play-whatsnew/whatsnew-en-US
 
       - name: Upload AAB to Google Play production
-        uses: r0adkll/upload-google-play@v1
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1 current
         with:
           serviceAccountJson: signing/google-play-service-account.json
           packageName: com.hermeswebui.android
@@ -157,3 +161,8 @@ jobs:
           status: completed
           releaseName: Hermes WebUI Android v${{ inputs.version_name }}
           whatsNewDirectory: build/play-whatsnew
+
+      - name: Remove Play service account
+        if: always()
+        shell: bash
+        run: rm -f signing/google-play-service-account.json

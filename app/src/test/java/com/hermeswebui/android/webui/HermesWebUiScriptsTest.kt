@@ -5,6 +5,32 @@ import org.junit.Test
 
 class HermesWebUiScriptsTest {
     @Test
+    fun `blob bridge handles trusted and programmatic anchors with ordered bounded chunks`() {
+        val script = HermesWebUiScripts.blobDownloadScript
+
+        assertThat(script).contains("window.top !== window")
+        assertThat(script).contains("event.isTrusted")
+        assertThat(script).contains("HTMLAnchorElement.prototype.click")
+        assertThat(script).contains("url.protocol === \"blob:\"")
+        assertThat(script).contains("offset += 65536")
+        assertThat(script).contains("sequence")
+        assertThat(script).doesNotContain("addJavascriptInterface")
+    }
+
+    @Test
+    fun `theme bridge observes theme meta and emits canonical opaque colors`() {
+        val script = HermesWebUiScripts.themeColorScript
+
+        assertThat(script).contains("window.top !== window")
+        assertThat(script).contains("meta[name=\"theme-color\"]")
+        assertThat(script).contains("MutationObserver")
+        assertThat(script).contains("discovery?.disconnect()")
+        assertThat(script).contains("metaObserver.observe(meta, { attributes: true, attributeFilter: [\"content\"] })")
+        assertThat(script).contains("pixel[3] !== 255")
+        assertThat(script).contains("theme_color")
+    }
+
+    @Test
     fun `app settings script preserves folded navigation selectors`() {
         val script = HermesWebUiScripts.appSettingsEntryScript
 

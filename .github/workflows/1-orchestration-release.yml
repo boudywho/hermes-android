@@ -34,10 +34,13 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
           java-version: '17'
@@ -51,14 +54,6 @@ jobs:
           test -n "$ANDROID_KEY_ALIAS" || { echo "Missing ANDROID_KEY_ALIAS"; exit 1; }
           test -n "$ANDROID_KEY_PASSWORD" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
           test -n "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" || { echo "Missing GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64"; exit 1; }
-
-      - name: Decode release keystore
-        shell: bash
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/signing"
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$ANDROID_KEYSTORE_FILE"
-          test -f "$ANDROID_KEYSTORE_FILE" || { echo "Keystore file was not created"; exit 1; }
-          echo "Keystore file size: $(wc -c < "$ANDROID_KEYSTORE_FILE") bytes"
 
       - name: Auto-bump app version for manual releases
         id: auto_bump
@@ -122,14 +117,35 @@ jobs:
       - name: Build signed release artifacts
         shell: bash
         run: |
-          ./gradlew test :app:stageGithubReleaseApk :app:bundleRelease --no-daemon
+          umask 077
+          mkdir -p "$GITHUB_WORKSPACE/signing"
+          trap 'rm -f "$ANDROID_KEYSTORE_FILE"' EXIT
+          printf '%s' "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$ANDROID_KEYSTORE_FILE"
+          chmod 600 "$ANDROID_KEYSTORE_FILE"
+          test -s "$ANDROID_KEYSTORE_FILE" || { echo "Keystore file was not created"; exit 1; }
+
+          ./gradlew test lintDebug compileDebugAndroidTestKotlin :app:stageGithubReleaseApk :app:bundleRelease --no-daemon
 
           src_aab="$(find app/build/outputs/bundle/release -maxdepth 1 -type f -name '*.aab' | head -n 1)"
           test -n "$src_aab" || { echo "No release AAB found"; exit 1; }
           cp "$src_aab" "build/release/hermes-webui-v${{ steps.release_version.outputs.version_name }}.aab"
+          apk_path="$(find build/release -maxdepth 1 -type f -name 'hermes-webui-v*-github.apk' | head -n 1)"
+          test -n "$apk_path" || { echo "No GitHub APK found"; exit 1; }
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$apksigner_path" || { echo "apksigner was not found"; exit 1; }
+          signer_report="$("$apksigner_path" verify --verbose --print-certs "$apk_path")"
+          printf '%s\n' "$signer_report"
+          signer_count="$(printf '%s\n' "$signer_report" | grep -cE '^Signer #[0-9]+ certificate DN:')"
+          test "$signer_count" = "1" || { echo "Expected exactly one APK signer, found $signer_count"; exit 1; }
+          actual_cert="$(printf '%s\n' "$signer_report" | sed -nE 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]')"
+          expected_cert="2eb2a635706fee7cc32100e5d98614d0c8cd0bc3ee8cd96421a69ee6c1290242"
+          test "$actual_cert" = "$expected_cert" || { echo "APK signing certificate SHA-256 does not match the expected public release certificate"; exit 1; }
+          apk_name="$(basename "$apk_path")"
+          (cd build/release && sha256sum "$apk_name" > "$apk_name.sha256")
 
           find build/release -maxdepth 1 -type f -name '*.apk' -print
           find build/release -maxdepth 1 -type f -name '*.aab' -print
+          find build/release -maxdepth 1 -type f -name '*.sha256' -print
 
       - name: Validate staged release artifacts
         shell: bash
@@ -142,6 +158,12 @@ jobs:
             find build/release -maxdepth 1 -type f -name '*.apk' -print
             exit 1
           fi
+          checksum_count="$(find build/release -maxdepth 1 -type f -name 'hermes-webui-v*-github.apk.sha256' | wc -l | tr -d ' ')"
+          if [ "$checksum_count" != "1" ]; then
+            echo "Expected exactly one APK checksum sidecar, found $checksum_count."
+            exit 1
+          fi
+          (cd build/release && sha256sum --check --strict *.apk.sha256)
 
           if [ "$aab_count" != "1" ]; then
             echo "Expected exactly one Play AAB artifact, found $aab_count."
@@ -173,14 +195,16 @@ jobs:
           EOF
 
       - name: Upload signed GitHub APK artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.artifact_names.outputs.github_apk_artifact_name }}
-          path: build/release/*-github.apk
+          path: |
+            build/release/*-github.apk
+            build/release/*-github.apk.sha256
           if-no-files-found: error
 
       - name: Upload Play AAB artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.artifact_names.outputs.play_aab_artifact_name }}
           path: build/release/*.aab
@@ -215,7 +239,7 @@ jobs:
           test -n "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" || { echo "Missing GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64"; exit 1; }
 
       - name: Download Play AAB artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ${{ needs.build-release-artifacts.outputs.play_aab_artifact_name }}
           path: build/release
@@ -235,9 +259,13 @@ jobs:
       - name: Decode Google Play service account
         shell: bash
         run: |
+          umask 077
+          trap 'rm -f signing/google-play-service-account.json' ERR
           mkdir -p signing
-          echo "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" | base64 --decode > signing/google-play-service-account.json
-          test -f signing/google-play-service-account.json || { echo "Google Play service account file was not created"; exit 1; }
+          printf '%s' "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}" | base64 --decode > signing/google-play-service-account.json
+          chmod 600 signing/google-play-service-account.json
+          test -s signing/google-play-service-account.json || { echo "Google Play service account file was not created"; exit 1; }
+          trap - ERR
 
       - name: Build Play Store changelog
         shell: bash
@@ -313,7 +341,7 @@ jobs:
           cat build/play-whatsnew/whatsnew-en-US
 
       - name: Upload AAB to Google Play production
-        uses: r0adkll/upload-google-play@v1
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1 current
         with:
           serviceAccountJson: signing/google-play-service-account.json
           packageName: com.hermeswebui.android
@@ -322,3 +350,8 @@ jobs:
           status: completed
           releaseName: Hermes WebUI Android v${{ needs.build-release-artifacts.outputs.version_name }}
           whatsNewDirectory: build/play-whatsnew
+
+      - name: Remove Play service account
+        if: always()
+        shell: bash
+        run: rm -f signing/google-play-service-account.json

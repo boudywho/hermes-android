@@ -22,6 +22,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Message
+import android.os.Parcel
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.WindowManager
@@ -83,6 +84,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.ViewModelProvider
 import androidx.webkit.ScriptHandler
@@ -112,6 +114,10 @@ import com.hermeswebui.android.ui.settings.VpnLaunchAppOption
 import com.hermeswebui.android.ui.web.WebShell
 import com.hermeswebui.android.webui.HermesWebUiScripts
 import com.hermeswebui.android.webview.HermesWebViewConfigurator
+import com.hermeswebui.android.webview.HermesBlobDownloadCoordinator
+import com.hermeswebui.android.webview.HermesThemeColorCoordinator
+import com.hermeswebui.android.webview.ThemeColorPolicy
+import com.hermeswebui.android.webview.WebViewRestorePolicy
 import com.hermeswebui.android.update.HermesAppUpdateCoordinator
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
@@ -134,6 +140,10 @@ private const val TailscaleConnectVpnAction = "com.tailscale.ipn.CONNECT_VPN"
 private const val VpnReconnectPollIntervalMs = 1_000L
 private const val TailscaleAutoConnectFallbackMs = 10_000L
 private const val EnableAppSettingsSidebarShim = true
+private const val WebViewStateKey = "hermes.webview.STATE"
+private const val WebViewStateServerUrlKey = "hermes.webview.SERVER_URL"
+private const val WebViewStateCurrentUrlKey = "hermes.webview.CURRENT_URL"
+private const val MaxSavedWebViewStateBytes = 512 * 1024
 
 private val HermesDarkColorScheme = darkColorScheme(
     primary = Color(0xFFFFD700),
@@ -201,6 +211,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var notificationPresenter: HermesNotificationPresenter
     private lateinit var serverProfileCoordinator: HermesServerProfileCoordinator
     private lateinit var foregroundServiceCoordinator: HermesForegroundServiceCoordinator
+    private lateinit var blobDownloadCoordinator: HermesBlobDownloadCoordinator
+    private lateinit var themeColorCoordinator: HermesThemeColorCoordinator
+    private var webViewStateInvalidated = false
     private val appUpdateDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
@@ -286,6 +299,17 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    private val legacyStoragePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                Toast.makeText(
+                    this,
+                    R.string.blob_download_storage_permission_required,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
     private val playUpdateLauncher =
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
             if (result.resultCode != RESULT_OK) {
@@ -295,6 +319,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        activityVisible = true
 
         // Begin logcat capture to an app-private file BEFORE any other onCreate
         // work, so a crash or permission denial during startup is still captured.
@@ -375,6 +400,12 @@ class MainActivity : ComponentActivity() {
             onCancelAutoRetry = viewModel::cancelAutoRetry,
             onSetDebugLoggingEnabled = viewModel::setDebugLoggingEnabled
         )
+        blobDownloadCoordinator = HermesBlobDownloadCoordinator(this) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                legacyStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+        themeColorCoordinator = HermesThemeColorCoordinator(::applyWebUiChromeColor)
         urlPolicy = UrlPolicy(viewModel.uiState.value.settings.allowedHosts)
 
         val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -390,10 +421,23 @@ class MainActivity : ComponentActivity() {
         applyScreenshotSecurity(settingsRepository.isBlockScreenshotsEnabled())
         webView = buildWebView()
         installHermesWebUiDocumentStartFixes(webView, viewModel.uiState.value.settings.serverUrl)
+        installHermesWebUiNativeBridges(webView, viewModel.uiState.value.settings.serverUrl)
 
-        if (!appUpdateCoordinator.handleIntent(intent)) {
+        val appUpdateIntentHandled = appUpdateCoordinator.handleIntent(intent)
+        val notificationIntentHandled = !appUpdateIntentHandled &&
+            notificationPresenter.handleIntent(intent, webView::loadUrl)
+        val deepLinkIntentHandled = !appUpdateIntentHandled &&
+            !notificationIntentHandled &&
+            handleDeepLink(intent)
+        if (!appUpdateIntentHandled && !notificationIntentHandled && !deepLinkIntentHandled) {
             handleShareIntent(intent)
         }
+        val nativeSettingsDeepLinkHandled = deepLinkIntentHandled &&
+            intent.data?.let { it.scheme == "hermes" && it.host == "app" && it.path == "/settings" } == true
+        val explicitNavigationHandled =
+            notificationIntentHandled || (deepLinkIntentHandled && !nativeSettingsDeepLinkHandled)
+        val restoredWebViewState = !explicitNavigationHandled &&
+            restoreWebViewStateIfTrusted(savedInstanceState)
 
         setContent {
             AppContent(
@@ -417,8 +461,10 @@ class MainActivity : ComponentActivity() {
         val settings = viewModel.uiState.value.settings
         if (!settings.isConfigured) {
             viewModel.openSettings()
-        } else {
+        } else if (!explicitNavigationHandled && !restoredWebViewState) {
             preflightConfiguredStartupServer(settings.serverUrl)
+            appUpdateCoordinator.scheduleAutomaticAppUpdateCheck()
+        } else {
             appUpdateCoordinator.scheduleAutomaticAppUpdateCheck()
         }
     }
@@ -481,7 +527,19 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         stopVpnReconnectWaitLoop()
         runCatching { unregisterReceiver(appUpdateDownloadReceiver) }
+        if (::blobDownloadCoordinator.isInitialized) blobDownloadCoordinator.close()
+        if (::themeColorCoordinator.isInitialized) themeColorCoordinator.close()
+        if (::webView.isInitialized) {
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+            webView.stopLoading()
+            webView.destroy()
+        }
         super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        saveWebViewStateIfTrusted(outState)
+        super.onSaveInstanceState(outState)
     }
 
     /** Handles Hermes app deep links.
@@ -850,6 +908,8 @@ class MainActivity : ComponentActivity() {
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    blobDownloadCoordinator.cancelForNavigation()
+                    themeColorCoordinator.reset()
                     handleMainWebViewPageStarted(url)
                 }
 
@@ -867,6 +927,12 @@ class MainActivity : ComponentActivity() {
                         rememberLastUrl = !matchesConfiguredDashboardRoute(url)
                     )
                     CookieManager.getInstance().flush()
+                    if (matchesConfiguredWebUiRoute(url) && url?.let(urlPolicy::isAllowed) == true) {
+                        if (webViewStateInvalidated) {
+                            webView.clearHistory()
+                        }
+                        webViewStateInvalidated = false
+                    }
                 }
 
                 override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
@@ -914,6 +980,7 @@ class MainActivity : ComponentActivity() {
                         )
                     )
                     viewModel.onPageError(message, offline)
+                    themeColorCoordinator.reset()
                 }
 
                 override fun onReceivedHttpError(
@@ -946,6 +1013,7 @@ class MainActivity : ComponentActivity() {
                         )
                     )
                     viewModel.onPageError("SSL validation failed for this page.", false)
+                    themeColorCoordinator.reset()
                 }
             }
 
@@ -1535,6 +1603,26 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun installHermesWebUiNativeBridges(view: WebView, serverUrl: String) {
+        blobDownloadCoordinator.install(view, serverUrl)
+        themeColorCoordinator.install(view, serverUrl)
+    }
+
+    private fun applyWebUiChromeColor(color: Int) {
+        if (!::webView.isInitialized) return
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            webView.setBackgroundColor(color)
+            window.statusBarColor = color
+            window.navigationBarColor = color
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                val darkIcons = ThemeColorPolicy.useDarkIcons(color)
+                isAppearanceLightStatusBars = darkIcons
+                isAppearanceLightNavigationBars = darkIcons
+            }
+        }
+    }
+
     private fun removeHermesWebUiDocumentStartFixes() {
         microphoneFallbackScriptHandler?.remove()
         notificationBridgeScriptHandler?.remove()
@@ -1666,6 +1754,7 @@ class MainActivity : ComponentActivity() {
             viewModel.saveAppUrls(serverUrl, dashboardUrl)
             urlPolicy = UrlPolicy(viewModel.uiState.value.settings.allowedHosts)
             installHermesWebUiDocumentStartFixes(webView, serverUrl)
+            installHermesWebUiNativeBridges(webView, serverUrl)
             requestLocalNetworkPermissionIfNeeded(
                 url = serverUrl,
                 onGranted = {
@@ -1696,10 +1785,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun resetWebSession() {
+        webViewStateInvalidated = true
+        blobDownloadCoordinator.cancelForNavigation()
+        themeColorCoordinator.reset()
         viewModel.resetSession()
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         WebStorage.getInstance().deleteAllData()
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
         webView.clearHistory()
         webView.clearCache(true)
         webView.clearFormData()
@@ -1819,6 +1913,7 @@ class MainActivity : ComponentActivity() {
         viewModel.switchServerProfile(profile.id)
         urlPolicy = UrlPolicy(viewModel.uiState.value.settings.allowedHosts)
         installHermesWebUiDocumentStartFixes(webView, profile.url)
+        installHermesWebUiNativeBridges(webView, profile.url)
         requestLocalNetworkPermissionIfNeeded(
             url = profile.url,
             onGranted = {
@@ -1833,6 +1928,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearWebViewStateForServerSwitch() {
+        webViewStateInvalidated = true
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         WebStorage.getInstance().deleteAllData()
@@ -1841,6 +1937,82 @@ class MainActivity : ComponentActivity() {
         webView.clearHistory()
         webView.clearCache(true)
         webView.clearFormData()
+    }
+
+    private fun restoreWebViewStateIfTrusted(savedInstanceState: Bundle?): Boolean {
+        val state = savedInstanceState?.getBundle(WebViewStateKey) ?: return false
+        val savedServerUrl = state.getString(WebViewStateServerUrlKey)
+        val savedCurrentUrl = state.getString(WebViewStateCurrentUrlKey)
+        val configuredServerUrl = viewModel.uiState.value.settings.serverUrl
+        if (!WebViewRestorePolicy.mayAttemptRestore(
+                savedServerUrl = savedServerUrl,
+                savedCurrentUrl = savedCurrentUrl,
+                configuredServerUrl = configuredServerUrl,
+                hasExplicitNavigationIntent = false,
+                stateInvalidated = webViewStateInvalidated,
+                isAllowedUrl = urlPolicy::isAllowed,
+                isDashboardUrl = ::matchesConfiguredDashboardRoute
+            )
+        ) {
+            return false
+        }
+        val restored = runCatching { webView.restoreState(state) }.getOrNull() ?: return false
+        val restoredUrls = (0 until restored.size)
+            .mapNotNull { index -> restored.getItemAtIndex(index)?.url }
+        if (!WebViewRestorePolicy.areHistoryUrlsTrusted(
+                urls = restoredUrls,
+                configuredServerUrl = configuredServerUrl,
+                isAllowedUrl = urlPolicy::isAllowed,
+                isDashboardUrl = ::matchesConfiguredDashboardRoute
+            )
+        ) {
+            return rejectRestoredState()
+        }
+        val restoredCurrentUrl = restored.currentItem?.url ?: webView.url ?: return rejectRestoredState()
+        if (!UrlOrigins.hasSameOrigin(restoredCurrentUrl, configuredServerUrl) ||
+            !urlPolicy.isAllowed(restoredCurrentUrl) ||
+            matchesConfiguredDashboardRoute(restoredCurrentUrl)
+        ) {
+            return rejectRestoredState()
+        }
+        viewModel.onUrlVisited(restoredCurrentUrl, rememberLastUrl = true)
+        return true
+    }
+
+    private fun rejectRestoredState(): Boolean {
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.clearHistory()
+        themeColorCoordinator.reset()
+        return false
+    }
+
+    private fun saveWebViewStateIfTrusted(outState: Bundle) {
+        if (!::webView.isInitialized || webViewStateInvalidated) return
+        val currentUrl = webView.url ?: return
+        val serverUrl = viewModel.uiState.value.settings.serverUrl
+        if (!UrlOrigins.hasSameOrigin(currentUrl, serverUrl) ||
+            !urlPolicy.isAllowed(currentUrl) ||
+            matchesConfiguredDashboardRoute(currentUrl)
+        ) {
+            return
+        }
+        val state = Bundle()
+        if (webView.saveState(state) == null) return
+        state.putString(WebViewStateServerUrlKey, serverUrl)
+        state.putString(WebViewStateCurrentUrlKey, currentUrl)
+        val parcel = Parcel.obtain()
+        val byteCount = try {
+            runCatching {
+                state.writeToParcel(parcel, 0)
+                parcel.dataSize()
+            }.getOrNull()
+        } finally {
+            parcel.recycle()
+        } ?: return
+        if (byteCount in 1..MaxSavedWebViewStateBytes) {
+            outState.putBundle(WebViewStateKey, state)
+        }
     }
 
     private fun shouldDirectCaptureImage(fileChooserParams: WebChromeClient.FileChooserParams?): Boolean {

@@ -2,6 +2,8 @@ package com.hermeswebui.android.background
 
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -9,16 +11,24 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.webkit.CookieManager
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.hermeswebui.android.MainActivity
 import com.hermeswebui.android.R
+import com.hermeswebui.android.core.security.UrlPolicy
+import com.hermeswebui.android.data.SettingsRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.net.HttpURLConnection
@@ -27,6 +37,7 @@ import java.net.URLEncoder
 
 class HermesReconnectService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val settingsRepository by lazy { SettingsRepository(applicationContext) }
     private var sessionStreamJob: Job? = null
 
     // Reference to the in-flight SSE connection so cancellation can actively close the socket.
@@ -41,7 +52,6 @@ class HermesReconnectService : Service() {
     private var activeSessionTargetUrl: String? = null
     private var activeCookieHeader: String? = null
     private var activePollIntervalSeconds: Int = DEFAULT_POLL_INTERVAL_SECONDS
-    private var activeSseTransportEnabled: Boolean = false
     private var activeIsReconnecting: Boolean = false
     private var activeShowFullTextOnLockScreen: Boolean = false
     private var currentNotificationBody: String = ""
@@ -53,27 +63,38 @@ class HermesReconnectService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val pollIntervalSeconds = intent
-            ?.getIntExtra(EXTRA_POLL_INTERVAL_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS)
-            ?: DEFAULT_POLL_INTERVAL_SECONDS
-        val serverUrl = intent?.getStringExtra(EXTRA_SERVER_URL)
-        val sessionId = intent?.getStringExtra(EXTRA_SESSION_ID)
-        val sessionTargetUrl = intent?.getStringExtra(EXTRA_SESSION_TARGET_URL)
-        val cookieHeader = intent?.getStringExtra(EXTRA_COOKIE_HEADER)
-        val sseTransportEnabled = intent?.getBooleanExtra(EXTRA_SSE_TRANSPORT_ENABLED, false) == true
-        val isReconnecting = intent?.getBooleanExtra(EXTRA_IS_RECONNECTING, false) == true
+        val recovered = if (intent == null) recoverAfterProcessRestart() else null
+        if (intent == null && recovered == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val pollIntervalSeconds = intent?.getIntExtra(
+            EXTRA_POLL_INTERVAL_SECONDS,
+            DEFAULT_POLL_INTERVAL_SECONDS
+        ) ?: recovered?.pollIntervalSeconds ?: DEFAULT_POLL_INTERVAL_SECONDS
+        val serverUrl = intent?.getStringExtra(EXTRA_SERVER_URL) ?: recovered?.serverUrl
+        val sessionId = intent?.getStringExtra(EXTRA_SESSION_ID) ?: recovered?.sessionId
+        val sessionTargetUrl =
+            intent?.getStringExtra(EXTRA_SESSION_TARGET_URL) ?: recovered?.sessionTargetUrl
+        val cookieHeader =
+            intent?.getStringExtra(EXTRA_COOKIE_HEADER) ?: recovered?.cookieHeader
+        val isReconnecting = intent?.getBooleanExtra(EXTRA_IS_RECONNECTING, false)
+            ?: recovered?.isReconnecting
+            ?: false
         val showFullTextOnLockScreen =
-            intent?.getBooleanExtra(EXTRA_SHOW_FULL_TEXT_ON_LOCK_SCREEN, false) == true
+            intent?.getBooleanExtra(EXTRA_SHOW_FULL_TEXT_ON_LOCK_SCREEN, false)
+                ?: recovered?.showFullTextOnLockScreen
+                ?: false
 
         activeServerUrl = serverUrl
         activeSessionId = sessionId
         activeSessionTargetUrl = sessionTargetUrl
         activeCookieHeader = cookieHeader
         activePollIntervalSeconds = pollIntervalSeconds
-        activeSseTransportEnabled = sseTransportEnabled
         activeIsReconnecting = isReconnecting
         activeShowFullTextOnLockScreen = showFullTextOnLockScreen
 
+        ensureBackgroundActivityChannel()
         val notification = buildNotification(
             pollIntervalSeconds = pollIntervalSeconds,
             contentText = currentNotificationBody.ifBlank {
@@ -96,23 +117,22 @@ class HermesReconnectService : Service() {
 
         if (intent?.action == ACTION_RESPOND_APPROVAL) {
             handleApprovalAction(intent)
-            return START_NOT_STICKY
+            return START_STICKY
         }
 
         cancelSessionStream()
         sessionStreamJob = serviceScope.launch {
-            streamSessionUpdates(
+            monitorSessionUpdates(
                 baseUrl = serverUrl,
                 sessionId = sessionId,
                 cookieHeader = cookieHeader,
                 sessionTargetUrl = sessionTargetUrl,
                 pollIntervalSeconds = pollIntervalSeconds,
-                sseTransportEnabled = sseTransportEnabled,
                 isReconnecting = isReconnecting,
                 showFullTextOnLockScreen = showFullTextOnLockScreen
             )
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onDestroy() {
@@ -120,6 +140,12 @@ class HermesReconnectService : Service() {
         serviceScope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
+    }
+
+    @RequiresApi(35)
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        cancelSessionStream()
+        stopSelf(startId)
     }
 
     /**
@@ -148,7 +174,10 @@ class HermesReconnectService : Service() {
             buildLaunchIntent(targetUrl),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val publicNotification = NotificationCompat.Builder(this, HERMES_NOTIFICATION_CHANNEL_ID)
+        val publicNotification = NotificationCompat.Builder(
+            this,
+            ReconnectNotificationPolicy.CHANNEL_ID
+        )
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.reconnect_notification_title))
             .setContentText(publicNotificationBody(isReconnecting))
@@ -159,7 +188,7 @@ class HermesReconnectService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        return NotificationCompat.Builder(this, HERMES_NOTIFICATION_CHANNEL_ID)
+        return NotificationCompat.Builder(this, ReconnectNotificationPolicy.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.reconnect_notification_title))
             .setContentText(contentText)
@@ -182,6 +211,18 @@ class HermesReconnectService : Service() {
                 addApprovalActions(this, approvalRequest, targetUrl)
             }
             .build()
+    }
+
+    private fun ensureBackgroundActivityChannel() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        val channel = NotificationChannel(
+            ReconnectNotificationPolicy.CHANNEL_ID,
+            getString(R.string.background_activity_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = getString(R.string.background_activity_channel_description)
+        }
+        manager.createNotificationChannel(channel)
     }
 
     private fun addApprovalActions(
@@ -241,7 +282,6 @@ class HermesReconnectService : Service() {
             putExtra(EXTRA_SESSION_TARGET_URL, targetUrl)
             putExtra(EXTRA_COOKIE_HEADER, cookieHeader)
             putExtra(EXTRA_POLL_INTERVAL_SECONDS, activePollIntervalSeconds)
-            putExtra(EXTRA_SSE_TRANSPORT_ENABLED, activeSseTransportEnabled)
             putExtra(EXTRA_IS_RECONNECTING, activeIsReconnecting)
             putExtra(EXTRA_SHOW_FULL_TEXT_ON_LOCK_SCREEN, activeShowFullTextOnLockScreen)
             putExtra(EXTRA_APPROVAL_ID, approvalId)
@@ -380,51 +420,86 @@ class HermesReconnectService : Service() {
         }
     }
 
-    private fun streamSessionUpdates(
+    private suspend fun monitorSessionUpdates(
         baseUrl: String?,
         sessionId: String?,
         cookieHeader: String?,
         sessionTargetUrl: String?,
         pollIntervalSeconds: Int,
-        sseTransportEnabled: Boolean,
         isReconnecting: Boolean,
         showFullTextOnLockScreen: Boolean
     ) {
-        if (!sseTransportEnabled || baseUrl.isNullOrBlank() || sessionId.isNullOrBlank()) {
-            if (!isReconnecting) {
-                stopSelf()
+        var failures = 0
+        while (currentCoroutineContext().isActive) {
+            val refreshedSessionId = sessionId
+                ?: ReconnectSessionStreamSupport.sessionIdFromUrl(
+                    runCatching { settingsRepository.getLastLoadedUrl() }.getOrNull()
+                )
+            val currentCookie = baseUrl
+                ?.let { runCatching { CookieManager.getInstance().getCookie(it) }.getOrNull() }
+            val refreshedCookie = ReconnectSessionCookiePolicy.cookieHeader(
+                currentCookie = currentCookie,
+                initialCookie = cookieHeader
+            )
+            if (baseUrl.isNullOrBlank() ||
+                refreshedSessionId.isNullOrBlank() ||
+                refreshedCookie.isNullOrBlank()
+            ) {
+                delay(ReconnectRetryPolicy.delayMs(failures++))
+                continue
             }
-            return
+            val result = streamSessionUpdatesOnce(
+                baseUrl = baseUrl,
+                sessionId = refreshedSessionId,
+                cookieHeader = refreshedCookie,
+                sessionTargetUrl = sessionTargetUrl,
+                pollIntervalSeconds = pollIntervalSeconds,
+                isReconnecting = isReconnecting,
+                showFullTextOnLockScreen = showFullTextOnLockScreen
+            )
+            failures = if (result == StreamResult.CONNECTED) 0 else failures
+            delay(ReconnectRetryPolicy.delayMs(failures))
+            if (result == StreamResult.UNAVAILABLE) failures += 1
         }
+    }
 
-        val encodedSessionId = runCatching { URLEncoder.encode(sessionId, Charsets.UTF_8.name()) }.getOrNull() ?: return
+    private fun streamSessionUpdatesOnce(
+        baseUrl: String,
+        sessionId: String,
+        cookieHeader: String,
+        sessionTargetUrl: String?,
+        pollIntervalSeconds: Int,
+        isReconnecting: Boolean,
+        showFullTextOnLockScreen: Boolean
+    ): StreamResult {
+        val encodedSessionId = runCatching {
+            URLEncoder.encode(sessionId, Charsets.UTF_8.name())
+        }.getOrNull() ?: return StreamResult.UNAVAILABLE
         val url = runCatching {
-            URI(baseUrl.trimEnd('/')).resolve("/api/session/stream?session_id=$encodedSessionId").toURL()
-        }.getOrNull() ?: return
-
-        val connection = (runCatching { url.openConnection() as HttpURLConnection }.getOrNull()) ?: return
+            URI(baseUrl.trimEnd('/'))
+                .resolve("/api/session/stream?session_id=$encodedSessionId")
+                .toURL()
+        }.getOrNull() ?: return StreamResult.UNAVAILABLE
+        val connection = runCatching {
+            url.openConnection() as HttpURLConnection
+        }.getOrNull() ?: return StreamResult.UNAVAILABLE
         activeStreamConnection = connection
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 4_000
-            connection.readTimeout = 45_000
-            connection.instanceFollowRedirects = false
-            connection.setRequestProperty("Accept", "text/event-stream")
-            if (!cookieHeader.isNullOrBlank()) {
-                connection.setRequestProperty("Cookie", cookieHeader)
+        return try {
+            connection.apply {
+                requestMethod = "GET"
+                connectTimeout = 4_000
+                readTimeout = 45_000
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "text/event-stream")
+                setRequestProperty("Cookie", cookieHeader)
             }
-
             val responseCode = connection.responseCode
             val contentType = connection.contentType.orEmpty()
             if (responseCode !in 200..299 || !contentType.contains("text/event-stream", ignoreCase = true)) {
-                if (!isReconnecting) {
-                    stopSelf()
-                }
-                return
+                return StreamResult.UNAVAILABLE
             }
-
             connection.inputStream.bufferedReader().use { reader ->
-                val shouldStop = consumeSse(
+                consumeSse(
                     reader = reader,
                     baseUrl = baseUrl,
                     sessionTargetUrl = sessionTargetUrl,
@@ -432,15 +507,11 @@ class HermesReconnectService : Service() {
                     showFullTextOnLockScreen = showFullTextOnLockScreen,
                     isReconnecting = isReconnecting
                 )
-                if (shouldStop || !isReconnecting) {
-                    stopSelf()
-                }
             }
-        } catch (_: Exception) {
-            if (!isReconnecting) {
-                stopSelf()
-            }
-            return
+            StreamResult.CONNECTED
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            StreamResult.UNAVAILABLE
         } finally {
             // Only clear the shared reference if it still points at this connection: a concurrent
             // relaunch may have already installed a newer one that must stay cancelable.
@@ -456,7 +527,7 @@ class HermesReconnectService : Service() {
         pollIntervalSeconds: Int,
         showFullTextOnLockScreen: Boolean,
         isReconnecting: Boolean
-    ): Boolean {
+    ) {
         var eventName: String? = null
         val dataLines = mutableListOf<String>()
 
@@ -483,7 +554,7 @@ class HermesReconnectService : Service() {
                                 isReconnecting = isReconnecting
                             )
                             if (update.isTerminal) {
-                                return true
+                                return
                             }
                         }
                     }
@@ -492,7 +563,33 @@ class HermesReconnectService : Service() {
                 }
             }
         }
-        return false
+    }
+
+    private fun recoverAfterProcessRestart(): StartConfiguration? {
+        val repository = runCatching { settingsRepository }.getOrNull()
+            ?: return null
+        val settings = repository.getSettings(
+            getString(R.string.default_server_url),
+            getString(R.string.default_dashboard_url)
+        )
+        val policy = UrlPolicy(settings.allowedHosts)
+        val recovered = BackgroundMonitorRestartPolicy.recover(
+            enabled = repository.isBackgroundReconnectEnabled(),
+            configuredServerUrl = settings.serverUrl,
+            lastLoadedUrl = repository.getLastLoadedUrl(),
+            isTrustedUrl = policy::isAllowed
+        ) ?: return null
+        return StartConfiguration(
+            pollIntervalSeconds = repository.getReconnectPollIntervalSeconds(),
+            serverUrl = recovered.serverUrl,
+            sessionId = recovered.sessionId,
+            sessionTargetUrl = recovered.currentUrl,
+            cookieHeader = runCatching {
+                CookieManager.getInstance().getCookie(recovered.serverUrl)
+            }.getOrNull(),
+            isReconnecting = false,
+            showFullTextOnLockScreen = repository.isBackgroundActivityFullTextEnabled()
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -571,12 +668,10 @@ class HermesReconnectService : Service() {
         private const val EXTRA_SESSION_ID = "extra.SESSION_ID"
         private const val EXTRA_SESSION_TARGET_URL = "extra.SESSION_TARGET_URL"
         private const val EXTRA_COOKIE_HEADER = "extra.COOKIE_HEADER"
-        private const val EXTRA_SSE_TRANSPORT_ENABLED = "extra.SSE_TRANSPORT_ENABLED"
         private const val EXTRA_IS_RECONNECTING = "extra.IS_RECONNECTING"
         private const val EXTRA_SHOW_FULL_TEXT_ON_LOCK_SCREEN = "extra.SHOW_FULL_TEXT_ON_LOCK_SCREEN"
         private const val EXTRA_APPROVAL_ID = "extra.APPROVAL_ID"
         private const val EXTRA_APPROVAL_CHOICE = "extra.APPROVAL_CHOICE"
-        private const val HERMES_NOTIFICATION_CHANNEL_ID = "hermes_webui_notifications"
         private const val RECONNECT_NOTIFICATION_ID = 20_001
         private const val DEFAULT_POLL_INTERVAL_SECONDS = 1
         private const val MAX_RESPONDED_APPROVAL_HISTORY = 64
@@ -590,7 +685,6 @@ class HermesReconnectService : Service() {
             sessionId: String?,
             sessionTargetUrl: String?,
             cookieHeader: String?,
-            sseTransportEnabled: Boolean,
             isReconnecting: Boolean,
             showFullTextOnLockScreen: Boolean
         ) {
@@ -600,7 +694,6 @@ class HermesReconnectService : Service() {
                 putExtra(EXTRA_SESSION_ID, sessionId)
                 putExtra(EXTRA_SESSION_TARGET_URL, sessionTargetUrl)
                 putExtra(EXTRA_COOKIE_HEADER, cookieHeader)
-                putExtra(EXTRA_SSE_TRANSPORT_ENABLED, sseTransportEnabled)
                 putExtra(EXTRA_IS_RECONNECTING, isReconnecting)
                 putExtra(EXTRA_SHOW_FULL_TEXT_ON_LOCK_SCREEN, showFullTextOnLockScreen)
             }
@@ -611,6 +704,19 @@ class HermesReconnectService : Service() {
             context.stopService(Intent(context, HermesReconnectService::class.java))
         }
     }
+
+    private enum class StreamResult {
+        CONNECTED,
+        UNAVAILABLE
+    }
+
+    private data class StartConfiguration(
+        val pollIntervalSeconds: Int,
+        val serverUrl: String,
+        val sessionId: String?,
+        val sessionTargetUrl: String?,
+        val cookieHeader: String?,
+        val isReconnecting: Boolean,
+        val showFullTextOnLockScreen: Boolean
+    )
 }
-
-

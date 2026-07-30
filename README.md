@@ -127,10 +127,10 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 
 ### Real Android integration
 
-- File uploads and downloads, including direct camera capture when pages request image capture
+- File uploads and downloads, including direct camera capture and trusted `blob:` export streaming into Android Downloads
 - Share-to-app intake for text and files
 - Android-backed browser notifications for Hermes WebUI alerts
-- Optional ongoing background activity notification for trusted Hermes sessions
+- Optional ongoing background monitoring with a passive foreground-service notification and trusted session activity updates when available
 - Optional debug-log capture with persistent foreground notification and one-tap stop action
 - Channel-aware app updates: Play uses in-app update flow, GitHub APK builds download and hand off to installer in-app
 - GitHub APK updates surface a stateful in-app action flow (`Check` -> `Download` -> `Install`) and still show an install-ready notification when Hermes is backgrounded
@@ -141,6 +141,7 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 - Allowlisted Hermes navigation stays in-app; other web links are externalized
 - Non-web schemes are blocked
 - Notification routing, microphone access, and callback handling stay scoped to trusted Hermes origins
+- Blob exports and live WebUI theme-color messages use exact-origin, main-frame-only AndroidX WebKit messaging without `addJavascriptInterface`
 - Local settings are encrypted with Android Keystore-backed storage
 - Optional VPN/Tailscale startup guard for Tailscale-addressed Hermes servers (`*.ts.net`, Tailscale CGNAT/ULA ranges)
 - Optional VPN launch-app picker with search plus a Tailscale default package fallback before Android VPN settings when the VPN/Tailscale guard blocks a server load; Hermes first asks Tailscale to connect while keeping Hermes on screen, keeps an every-second `/api/status` probe alive, automatically reloads once VPN and server are ready, and only opens Tailscale if auto-connect has not established a tunnel within ten seconds
@@ -247,6 +248,23 @@ Optional checks:
 .\gradlew.bat connectedDebugAndroidTest --no-daemon
 ```
 
+The main CI gate runs `clean testDebugUnitTest lintDebug
+compileDebugAndroidTestKotlin assembleDebug`. Activity recreation preserves a
+bounded WebView back/forward state only when its current page still matches the
+configured trusted WebUI origin; deep links, notification taps, reset-session,
+and server switching take precedence.
+
+Background activity monitoring is opt-in. While enabled and Hermes is
+backgrounded, Android keeps a low-priority ongoing notification even when no
+session stream is available. It stops when Hermes returns to the foreground or
+the setting is disabled and never starts at boot. Android and OEM battery
+optimization and Android foreground-service time limits can still delay or stop
+background work despite the foreground service.
+
+On Android 8 and 9, saving a WebUI `blob:` export to the public Downloads
+collection requires the platform storage permission; Android 10+ uses scoped
+MediaStore writes without that legacy permission.
+
 Release automation is centered on:
 
 - `.github/workflows/1-orchestration-release.yml`
@@ -257,9 +275,11 @@ Optional/manual Play workflows:
 - `.github/workflows/3-publish-play-store-production.yml`
 - `.github/workflows/play-store-beta-manual.yml`
 
-That flow builds:
+That flow verifies tests, lint, Android-test compilation, the single APK
+signer, and the expected public release certificate before it builds/publishes:
 
 - `hermes-webui-v<version>-github.apk` for GitHub/device installs
+- `hermes-webui-v<version>-github.apk.sha256` for independent checksum verification
 - `hermes-webui-v<version>.aab` for Google Play production
 
 Manual orchestration runs auto-bump `appVersionName` from the latest published
