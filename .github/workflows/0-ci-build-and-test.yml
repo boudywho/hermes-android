@@ -5,6 +5,7 @@ name: 0 - CI Build & Test
 # PR before merge. This adds that missing feedback loop without needing any
 # signing secrets (debug build only).
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
   pull_request:
