@@ -333,6 +333,9 @@ class MainActivity : ComponentActivity() {
         val defaultUrl = getString(R.string.default_server_url)
         val defaultDashboardUrl = getString(R.string.default_dashboard_url)
         settingsRepository = SettingsRepository(applicationContext)
+        check(settingsRepository.clearBackgroundActivityExitLatch()) {
+            "Unable to clear background activity Exit latch"
+        }
         appUpdateManager = AppUpdateManagerFactory.create(this)
         viewModel = ViewModelProvider(
             this,

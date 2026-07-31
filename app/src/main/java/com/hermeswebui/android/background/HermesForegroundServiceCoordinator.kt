@@ -28,7 +28,8 @@ class HermesForegroundServiceCoordinator(
         syncReconnectForegroundService(state, activityVisible = false)
         if (
             ReconnectBackgroundPolicy.shouldCancelAutoRetryOnStop(
-                backgroundReconnectEnabled = state.backgroundReconnectEnabled
+                backgroundReconnectEnabled = state.backgroundReconnectEnabled,
+                exitedUntilExplicitLaunch = isBackgroundActivityExitLatched()
             )
         ) {
             onCancelAutoRetry()
@@ -36,7 +37,13 @@ class HermesForegroundServiceCoordinator(
     }
 
     private fun syncReconnectForegroundService(state: MainUiState, activityVisible: Boolean) {
-        if (!state.backgroundReconnectEnabled) {
+        val exitedUntilExplicitLaunch = isBackgroundActivityExitLatched()
+        if (
+            !ReconnectBackgroundPolicy.shouldRunForegroundService(
+                backgroundReconnectEnabled = state.backgroundReconnectEnabled,
+                exitedUntilExplicitLaunch = exitedUntilExplicitLaunch
+            )
+        ) {
             stopReconnectForegroundService()
             return
         }
@@ -91,6 +98,12 @@ class HermesForegroundServiceCoordinator(
     private fun stopReconnectForegroundService() {
         HermesReconnectService.stop(context)
         reconnectDispatch.onStopped()
+    }
+
+    private fun isBackgroundActivityExitLatched(): Boolean {
+        return runCatching {
+            settingsRepository.isBackgroundActivityExitedUntilExplicitLaunch()
+        }.getOrDefault(true)
     }
 
     private fun syncDebugLoggingForegroundService(debugLoggingEnabled: Boolean) {

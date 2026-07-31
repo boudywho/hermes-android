@@ -185,6 +185,34 @@ class SettingsRepository(context: Context) : SettingsStore {
         sharedPreferences.edit { putBoolean(KEY_BACKGROUND_RECONNECT_ENABLED, enabled) }
     }
 
+    fun isBackgroundActivityExitedUntilExplicitLaunch(): Boolean {
+        return sharedPreferences.getBoolean(KEY_BACKGROUND_ACTIVITY_EXITED_UNTIL_EXPLICIT_LAUNCH, false)
+    }
+
+    /**
+     * Persists the notification Exit latch synchronously before process teardown.
+     * The monitoring preference remains untouched so an explicit app launch can resume it.
+     */
+    fun latchBackgroundActivityExit(): Boolean {
+        return commitBackgroundActivityExitLatch(exitedUntilExplicitLaunch = true)
+    }
+
+    /** Clears the process-exit latch synchronously at the start of an explicit app launch. */
+    fun clearBackgroundActivityExitLatch(): Boolean {
+        return commitBackgroundActivityExitLatch(exitedUntilExplicitLaunch = false)
+    }
+
+    private fun commitBackgroundActivityExitLatch(exitedUntilExplicitLaunch: Boolean): Boolean {
+        return BoundedCommit.run(maxAttempts = BACKGROUND_ACTIVITY_EXIT_COMMIT_ATTEMPTS) {
+            sharedPreferences.edit()
+                .putBoolean(
+                    KEY_BACKGROUND_ACTIVITY_EXITED_UNTIL_EXPLICIT_LAUNCH,
+                    exitedUntilExplicitLaunch
+                )
+                .commit()
+        }
+    }
+
     fun getReconnectPollIntervalSeconds(): Int {
         return sharedPreferences
             .getInt(KEY_RECONNECT_POLL_INTERVAL_SECONDS, DEFAULT_RECONNECT_POLL_INTERVAL_SECONDS)
@@ -451,6 +479,8 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val KEY_IS_CONFIGURED = "is_configured"
         private const val KEY_NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
         private const val KEY_BACKGROUND_RECONNECT_ENABLED = "background_reconnect_enabled"
+        private const val KEY_BACKGROUND_ACTIVITY_EXITED_UNTIL_EXPLICIT_LAUNCH =
+            "background_activity_exited_until_explicit_launch"
         private const val KEY_RECONNECT_POLL_INTERVAL_SECONDS = "reconnect_poll_interval_seconds"
         private const val KEY_REQUIRE_VPN_FOR_TAILSCALE_ENABLED = "require_vpn_for_tailscale_enabled"
         private const val KEY_VPN_LAUNCH_PACKAGE = "vpn_launch_package"
@@ -470,6 +500,7 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val DEFAULT_RECONNECT_POLL_INTERVAL_SECONDS = 1
         private const val MIN_RECONNECT_POLL_INTERVAL_SECONDS = 1
         private const val MAX_RECONNECT_POLL_INTERVAL_SECONDS = 10
+        private const val BACKGROUND_ACTIVITY_EXIT_COMMIT_ATTEMPTS = 3
         // Profile-related keys
         private const val KEY_SERVER_PROFILES = "server_profiles"
         private const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"

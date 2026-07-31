@@ -398,11 +398,6 @@ class HermesServerProfileCoordinator(
                     mapOf("origin" to DiagnosticsLogger.originOnly(serverUrl))
                 )
                 viewModel.clearServerValidationState()
-                Toast.makeText(
-                    context,
-                    "Server reachable — sign in on the Hermes page to finish.",
-                    Toast.LENGTH_LONG
-                ).show()
                 onSuccess()
                 return@launch
             }

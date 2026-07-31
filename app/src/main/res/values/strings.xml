@@ -12,6 +12,7 @@
     <string name="reconnect_notification_body_activity">Hermes is active and monitoring for background activity.</string>
     <string name="reconnect_notification_body_public_activity">Hermes is active in the background.</string>
     <string name="reconnect_notification_body_public_reconnecting">Hermes is trying to reconnect in the background.</string>
+    <string name="reconnect_notification_exit_action">Exit</string>
     <string name="background_activity_channel_name">Hermes background activity</string>
     <string name="background_activity_channel_description">Ongoing status while Hermes monitors activity in the background</string>
     <string name="approval_action_deny">Deny</string>

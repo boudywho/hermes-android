@@ -12,6 +12,7 @@ class BackgroundMonitorPolicyTest {
     fun `restart recovers only a trusted same-origin target while enabled`() {
         val recovered = BackgroundMonitorRestartPolicy.recover(
             enabled = true,
+            exitedUntilExplicitLaunch = false,
             configuredServerUrl = "https://hermes.example",
             lastLoadedUrl = "https://hermes.example/session-42",
             isTrustedUrl = { it.startsWith("https://hermes.example") }
@@ -19,18 +20,36 @@ class BackgroundMonitorPolicyTest {
         assertThat(recovered?.sessionId).isEqualTo("session-42")
         assertThat(
             BackgroundMonitorRestartPolicy.recover(
-                true,
-                "https://hermes.example",
-                "https://evil.example/session-42"
+                enabled = true,
+                exitedUntilExplicitLaunch = false,
+                configuredServerUrl = "https://hermes.example",
+                lastLoadedUrl = "https://evil.example/session-42"
             ) { it.startsWith("https://hermes.example") }?.currentUrl
         ).isEqualTo("https://hermes.example")
         assertThat(
             BackgroundMonitorRestartPolicy.recover(
-                false,
-                "https://hermes.example",
-                "https://hermes.example/session-42"
+                enabled = false,
+                exitedUntilExplicitLaunch = false,
+                configuredServerUrl = "https://hermes.example",
+                lastLoadedUrl = "https://hermes.example/session-42"
             ) { true }
         ).isNull()
+    }
+
+    @Test
+    fun `restart refuses recovery while exit latch is set and recovers once clear`() {
+        val recover: (Boolean) -> BackgroundMonitorRestartPolicy.RecoveredTarget? = { exited ->
+            BackgroundMonitorRestartPolicy.recover(
+                enabled = true,
+                exitedUntilExplicitLaunch = exited,
+                configuredServerUrl = "https://hermes.example",
+                lastLoadedUrl = "https://hermes.example/session-42",
+                isTrustedUrl = { true }
+            )
+        }
+
+        assertThat(recover(true)).isNull()
+        assertThat(recover(false)?.currentUrl).isEqualTo("https://hermes.example/session-42")
     }
 
     @Test

@@ -49,7 +49,7 @@ class ReconnectBackgroundPolicyTest {
     }
 
     @Test
-    fun `foreground service policy depends only on the user toggle`() {
+    fun `with exit latch clear foreground service policy follows the user toggle`() {
         val cases = listOf(
             true to true,
             false to false
@@ -62,5 +62,27 @@ class ReconnectBackgroundPolicyTest {
                 )
             ).isEqualTo(expectedRun)
         }
+    }
+
+    @Test
+    fun `enabled monitoring is not runnable while exit latch is set`() {
+        assertThat(
+            ReconnectBackgroundPolicy.shouldRunForegroundService(
+                backgroundReconnectEnabled = true,
+                exitedUntilExplicitLaunch = true
+            )
+        ).isFalse()
+        assertThat(
+            ReconnectBackgroundPolicy.shouldKeepAlive(
+                backgroundReconnectEnabled = true,
+                exitedUntilExplicitLaunch = true
+            )
+        ).isFalse()
+        assertThat(
+            ReconnectBackgroundPolicy.shouldCancelAutoRetryOnStop(
+                backgroundReconnectEnabled = true,
+                exitedUntilExplicitLaunch = true
+            )
+        ).isTrue()
     }
 }

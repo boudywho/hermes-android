@@ -7,6 +7,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 /**
  * Spawns a `logcat` process as early as possible during process start so the
@@ -79,8 +80,19 @@ object DebugLogBootstrap {
 
     fun stop() {
         synchronized(lock) {
-            runCatching { process?.destroy() }
+            stopProcess(process)
             process = null
+        }
+    }
+
+    private fun stopProcess(activeProcess: Process?) {
+        activeProcess ?: return
+        runCatching {
+            activeProcess.destroy()
+            if (!activeProcess.waitFor(PROCESS_STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                activeProcess.destroyForcibly()
+                activeProcess.waitFor(PROCESS_STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }
         }
     }
 
@@ -103,5 +115,6 @@ object DebugLogBootstrap {
             appendLine()
         }
     }
-}
 
+    private const val PROCESS_STOP_TIMEOUT_MS = 500L
+}

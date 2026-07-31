@@ -11,11 +11,12 @@ internal object BackgroundMonitorRestartPolicy {
 
     fun recover(
         enabled: Boolean,
+        exitedUntilExplicitLaunch: Boolean,
         configuredServerUrl: String,
         lastLoadedUrl: String?,
         isTrustedUrl: (String) -> Boolean
     ): RecoveredTarget? {
-        if (!enabled || configuredServerUrl.isBlank()) return null
+        if (!enabled || exitedUntilExplicitLaunch || configuredServerUrl.isBlank()) return null
         val current = lastLoadedUrl
             ?.takeIf { UrlOrigins.hasSameOrigin(it, configuredServerUrl) }
             ?.takeIf(isTrustedUrl)

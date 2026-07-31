@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.hermeswebui.android.MainActivity
 import com.hermeswebui.android.R
@@ -20,11 +21,19 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class HermesDebugLoggingService : Service() {
     private var logcatProcess: Process? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        synchronized(instanceLock) {
+            activeInstance = this
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_LOGGING) {
@@ -55,9 +64,22 @@ class HermesDebugLoggingService : Service() {
     }
 
     override fun onDestroy() {
+        try {
+            stopLogCapture()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } finally {
+            synchronized(instanceLock) {
+                if (activeInstance === this) activeInstance = null
+            }
+            super.onDestroy()
+        }
+    }
+
+    private fun stopForAppExitInternal() {
         stopLogCapture()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        super.onDestroy()
+        NotificationManagerCompat.from(this).cancel(DEBUG_LOGGING_NOTIFICATION_ID)
+        stopSelf()
     }
 
     private fun startLogCaptureIfNeeded() {
@@ -107,8 +129,18 @@ class HermesDebugLoggingService : Service() {
     }
 
     private fun stopLogCapture() {
-        runCatching { logcatProcess?.destroy() }
+        val activeProcess = logcatProcess
         logcatProcess = null
+        runCatching {
+            activeProcess?.destroy()
+            if (
+                activeProcess != null &&
+                !activeProcess.waitFor(PROCESS_STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            ) {
+                activeProcess.destroyForcibly()
+                activeProcess.waitFor(PROCESS_STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }
+        }
         // Also stop the pre-service bootstrap capture, if any, so that toggling
         // logging off (via the Stop notification action or Settings switch)
         // really stops disk writes instead of leaving an orphaned logcat alive.
@@ -214,6 +246,11 @@ class HermesDebugLoggingService : Service() {
         private const val ACTION_STOP_LOGGING = "com.hermeswebui.android.action.STOP_DEBUG_LOGGING"
         private const val DEBUG_LOGGING_CHANNEL_ID = "hermes_debug_logging"
         private const val DEBUG_LOGGING_NOTIFICATION_ID = 20_011
+        private const val PROCESS_STOP_TIMEOUT_MS = 500L
+        private val instanceLock = Any()
+
+        @Volatile
+        private var activeInstance: HermesDebugLoggingService? = null
 
         fun start(context: Context) {
             val intent = Intent(context, HermesDebugLoggingService::class.java)
@@ -223,7 +260,14 @@ class HermesDebugLoggingService : Service() {
         fun stop(context: Context) {
             context.stopService(Intent(context, HermesDebugLoggingService::class.java))
         }
+
+        internal fun stopForAppExit() {
+            val instance = synchronized(instanceLock) { activeInstance }
+            if (instance != null) {
+                instance.stopForAppExitInternal()
+            } else {
+                DebugLogBootstrap.stop()
+            }
+        }
     }
 }
-
-

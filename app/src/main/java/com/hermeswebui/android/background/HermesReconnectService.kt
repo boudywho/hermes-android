@@ -1,6 +1,7 @@
 package com.hermeswebui.android.background
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -62,6 +63,19 @@ class HermesReconnectService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_EXIT) {
+            handleExit(startId)
+            return START_NOT_STICKY
+        }
+        val exitedUntilExplicitLaunch = runCatching {
+            settingsRepository.isBackgroundActivityExitedUntilExplicitLaunch()
+        }.getOrDefault(true)
+        if (exitedUntilExplicitLaunch) {
+            cancelSessionStream()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val recovered = if (intent == null) recoverAfterProcessRestart() else null
         if (intent == null && recovered == null) {
             stopSelf()
@@ -173,6 +187,7 @@ class HermesReconnectService : Service() {
             buildLaunchIntent(targetUrl),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val exitAction = buildExitAction()
         val publicNotification = NotificationCompat.Builder(
             this,
             ReconnectNotificationPolicy.CHANNEL_ID
@@ -185,6 +200,7 @@ class HermesReconnectService : Service() {
             .setAutoCancel(false)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(exitAction)
             .build()
 
         return NotificationCompat.Builder(this, ReconnectNotificationPolicy.CHANNEL_ID)
@@ -208,8 +224,46 @@ class HermesReconnectService : Service() {
             .setPublicVersion(publicNotification)
             .apply {
                 addApprovalActions(this, approvalRequest, targetUrl)
+                addAction(exitAction)
             }
             .build()
+    }
+
+    private fun buildExitAction(): NotificationCompat.Action {
+        val exitIntent = Intent(this, HermesReconnectService::class.java).apply {
+            action = ACTION_EXIT
+        }
+        val exitPendingIntent = PendingIntent.getService(
+            this,
+            EXIT_ACTION_REQUEST_CODE,
+            exitIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Action.Builder(
+            0,
+            getString(R.string.reconnect_notification_exit_action),
+            exitPendingIntent
+        ).build()
+    }
+
+    private fun handleExit(startId: Int) {
+        // Persist first. Even if encrypted persistence fails, teardown remains fail-closed.
+        runCatching { settingsRepository.latchBackgroundActivityExit() }
+        runCatching { cancelSessionStream() }
+        runCatching { serviceScope.cancel() }
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        runCatching {
+            NotificationManagerCompat.from(this).cancel(RECONNECT_NOTIFICATION_ID)
+        }
+        runCatching { stopSelfResult(startId) }
+        runCatching {
+            getSystemService(ActivityManager::class.java)
+                ?.appTasks
+                ?.forEach { it.finishAndRemoveTask() }
+        }
+        runCatching { HermesDebugLoggingService.stopForAppExit() }
+        runCatching { HermesDebugLoggingService.stop(applicationContext) }
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     private fun ensureBackgroundActivityChannel() {
@@ -574,6 +628,7 @@ class HermesReconnectService : Service() {
         val policy = UrlPolicy(settings.allowedHosts)
         val recovered = BackgroundMonitorRestartPolicy.recover(
             enabled = repository.isBackgroundReconnectEnabled(),
+            exitedUntilExplicitLaunch = repository.isBackgroundActivityExitedUntilExplicitLaunch(),
             configuredServerUrl = settings.serverUrl,
             lastLoadedUrl = repository.getLastLoadedUrl(),
             isTrustedUrl = policy::isAllowed
@@ -661,6 +716,7 @@ class HermesReconnectService : Service() {
     }
 
     companion object {
+        private const val ACTION_EXIT = "com.hermeswebui.android.action.EXIT"
         private const val ACTION_RESPOND_APPROVAL = "com.hermeswebui.android.action.RESPOND_APPROVAL"
         private const val EXTRA_POLL_INTERVAL_SECONDS = "extra.POLL_INTERVAL_SECONDS"
         private const val EXTRA_SERVER_URL = "extra.SERVER_URL"
@@ -672,6 +728,7 @@ class HermesReconnectService : Service() {
         private const val EXTRA_APPROVAL_ID = "extra.APPROVAL_ID"
         private const val EXTRA_APPROVAL_CHOICE = "extra.APPROVAL_CHOICE"
         private const val RECONNECT_NOTIFICATION_ID = 20_001
+        private const val EXIT_ACTION_REQUEST_CODE = 20_002
         private const val DEFAULT_POLL_INTERVAL_SECONDS = 1
         private const val MAX_RESPONDED_APPROVAL_HISTORY = 64
         private const val ACTION_OPEN_NOTIFICATION_URL = "com.hermeswebui.android.OPEN_NOTIFICATION_URL"
