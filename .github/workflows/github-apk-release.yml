@@ -1,0 +1,140 @@
+name: GitHub APK Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: github-apk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/signing/upload-keystore.jks
+  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+jobs:
+  release:
+    name: Build and publish stable GitHub APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+
+      - name: Validate Android signing secrets
+        shell: bash
+        run: |
+          test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || { echo "Missing ANDROID_KEYSTORE_BASE64"; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "Missing ANDROID_KEYSTORE_PASSWORD"; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo "Missing ANDROID_KEY_ALIAS"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "Missing ANDROID_KEY_PASSWORD"; exit 1; }
+
+      - name: Build and verify signed GitHub APK
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$GITHUB_WORKSPACE/signing"
+          trap 'rm -f "$ANDROID_KEYSTORE_FILE"' EXIT
+          printf '%s' "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$ANDROID_KEYSTORE_FILE"
+          chmod 600 "$ANDROID_KEYSTORE_FILE"
+          test -s "$ANDROID_KEYSTORE_FILE" || { echo "Keystore file was not created"; exit 1; }
+
+          ./gradlew clean testDebugUnitTest lintDebug compileDebugAndroidTestKotlin :app:stageGithubReleaseApk --no-daemon
+
+          apk_path="$(find build/release -maxdepth 1 -type f -name 'hermes-webui-v*-github.apk' | head -n 1)"
+          test -n "$apk_path" || { echo "No GitHub APK found"; exit 1; }
+          apk_count="$(find build/release -maxdepth 1 -type f -name 'hermes-webui-v*-github.apk' | wc -l | tr -d ' ')"
+          test "$apk_count" = "1" || { echo "Expected exactly one GitHub APK, found $apk_count"; exit 1; }
+
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$apksigner_path" || { echo "apksigner was not found"; exit 1; }
+          signer_report="$("$apksigner_path" verify --verbose --print-certs "$apk_path")"
+          printf '%s\n' "$signer_report"
+          signer_count="$(printf '%s\n' "$signer_report" | grep -cE '^Signer #[0-9]+ certificate DN:')"
+          test "$signer_count" = "1" || { echo "Expected exactly one APK signer, found $signer_count"; exit 1; }
+          actual_cert="$(printf '%s\n' "$signer_report" | sed -nE 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]')"
+          expected_cert="2eb2a635706fee7cc32100e5d98614d0c8cd0bc3ee8cd96421a69ee6c1290242"
+          test "$actual_cert" = "$expected_cert" || { echo "APK signing certificate does not match the expected public release certificate"; exit 1; }
+
+          apk_name="$(basename "$apk_path")"
+          (cd build/release && sha256sum "$apk_name" > "$apk_name.sha256")
+          apk_sha256="$(sha256sum "$apk_path" | awk '{print $1}')"
+          echo "version_name=$(./gradlew -q :app:printReleaseVersionName)" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$apk_name" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=$apk_sha256" >> "$GITHUB_OUTPUT"
+          (cd build/release && sha256sum --check --strict *.apk.sha256)
+
+      - name: Upload verified GitHub APK artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.build.outputs.apk_name }}
+          path: |
+            build/release/*.apk
+            build/release/*.apk.sha256
+          if-no-files-found: error
+
+      - name: Publish stable GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.build.outputs.version_name }}
+          APK_NAME: ${{ steps.build.outputs.apk_name }}
+          APK_SHA256: ${{ steps.build.outputs.apk_sha256 }}
+        run: |
+          set -euo pipefail
+          release_tag="v${VERSION_NAME}"
+          apk_path="build/release/${APK_NAME}"
+          checksum_path="${apk_path}.sha256"
+          test -f "$apk_path" && test -f "$checksum_path"
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $release_tag already exists; refusing to overwrite an immutable release."
+            exit 1
+          fi
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$release_tag" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq '.body' > build/release/release-notes.md
+
+          {
+            printf '\n\n## Verification\n\n'
+            printf '%s\n' '- Stable GitHub APK release; Google Play is not involved.'
+            printf '%s\n' "- APK: \`$APK_NAME\`"
+            printf '%s\n' "- SHA-256: \`$APK_SHA256\`"
+            printf '%s\n' "- Commit: \`$GITHUB_SHA\`"
+          } >> build/release/release-notes.md
+
+          gh release create "$release_tag" "$apk_path" "$checksum_path" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Hermes WebUI Android $release_tag" \
+            --notes-file build/release/release-notes.md
+
+          {
+            echo "## Stable GitHub APK release"
+            echo
+            echo "- Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$release_tag"
+            echo "- APK: \`$APK_NAME\`"
+            echo "- SHA-256: \`$APK_SHA256\`"
+            echo "- Google Play: not required"
+          } >> "$GITHUB_STEP_SUMMARY"

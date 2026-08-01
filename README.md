@@ -164,8 +164,8 @@ Hermes-Android currently publishes through two release channels:
 
 Current checked-in release metadata:
 
-- Version name: `1.0.15`
-- Version code: `10015`
+- Version name: `1.0.16`
+- Version code: `10016`
 - Play application ID: `com.hermeswebui.android`
 - GitHub application ID: `com.hermeswebui.android.github`
 - Compile SDK / target SDK: `37`
@@ -273,18 +273,23 @@ Release automation is centered on:
 
 - `.github/workflows/1-orchestration-release.yml`
 - `.github/workflows/2-publish-github-apk.yml`
+- `.github/workflows/github-apk-release.yml` — stable GitHub APK-only releases; Google Play credentials are not required
 
 Optional/manual Play workflows:
 
 - `.github/workflows/3-publish-play-store-production.yml`
 - `.github/workflows/play-store-beta-manual.yml`
 
-That flow verifies tests, lint, Android-test compilation, the single APK
-signer, and the expected public release certificate before it builds/publishes:
+The GitHub APK-only flow verifies tests, lint, Android-test compilation, the
+single APK signer, and the expected public release certificate before it
+builds/publishes:
 
 - `hermes-webui-v<version>-github.apk` for GitHub/device installs
 - `hermes-webui-v<version>-github.apk.sha256` for independent checksum verification
-- `hermes-webui-v<version>.aab` for Google Play production
+
+The orchestration flow additionally builds and publishes
+`hermes-webui-v<version>.aab` for Google Play production, but that Play path is
+independent of the stable GitHub APK release.
 
 Manual orchestration runs auto-bump `appVersionName` from the latest published
 `vX.Y.Z` tag, sync the checked-in README release metadata, commit the bump back

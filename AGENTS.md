@@ -172,13 +172,14 @@ clearly out of scope or already tracked.
 When package identity, release signing, store distribution, or public release
 behavior changes, update `ROADMAP.md` and `README.md` in the same change.
 
-The repo uses four workflows for building and releasing:
+The repo uses five workflows for building and releasing:
 - `.github/workflows/1-orchestration-release.yml` — single signed release entry point; builds both the GitHub APK and Play AAB, then publishes GitHub and Play production in one run.
 - `.github/workflows/2-publish-github-apk.yml` — publishes the signed APK to GitHub Releases.
+- `.github/workflows/github-apk-release.yml` — stable GitHub APK-only release path; it must not require Google Play secrets.
 - `.github/workflows/3-publish-play-store-production.yml` — publishes the AAB to the Play **production** track.
 - `.github/workflows/play-store-beta-manual.yml` — optional/manual workflow that submits the AAB to the Play **open testing (beta)** track when needed.
 
-Keep all four workflows aligned with `app/build.gradle.kts`,
+Keep all five workflows aligned with `app/build.gradle.kts`,
 `keystore.properties.example`, and the documented GitHub secrets whenever the
 release flow changes. The GitHub publish workflow should publish only the
 `hermes-webui-v<version>-github.apk` APK, the Play production workflow should
