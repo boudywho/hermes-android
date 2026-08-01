@@ -5,13 +5,17 @@ import org.junit.Test
 
 class HermesWebUiScriptsTest {
     @Test
-    fun `blob bridge handles trusted and programmatic anchors with ordered bounded chunks`() {
+    fun `download bridge handles trusted and programmatic anchors with ordered bounded chunks`() {
         val script = HermesWebUiScripts.blobDownloadScript
 
         assertThat(script).contains("window.top !== window")
         assertThat(script).contains("event.isTrusted")
         assertThat(script).contains("HTMLAnchorElement.prototype.click")
         assertThat(script).contains("url.protocol === \"blob:\"")
+        assertThat(script).contains("type: \"download\"")
+        assertThat(script).contains("url.origin === window.location.origin")
+        assertThat(script).contains("filename.trim() !== \"\"")
+        assertThat(script).contains("event.preventDefault()")
         assertThat(script).contains("offset += 65536")
         assertThat(script).contains("sequence")
         assertThat(script).doesNotContain("addJavascriptInterface")

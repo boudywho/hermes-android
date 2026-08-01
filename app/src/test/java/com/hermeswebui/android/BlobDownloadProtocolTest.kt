@@ -68,4 +68,29 @@ class BlobDownloadProtocolTest {
             )
         ).isNull()
     }
+
+    @Test
+    fun `accepts only bounded HTTP anchor download requests`() {
+        assertThat(
+            BlobDownloadProtocol.parse(
+                """{"type":"download","id":"http_1","url":"https://hermes.example/export","filename":"月次 report.csv"}"""
+            )
+        ).isEqualTo(
+            BlobDownloadProtocol.Message.Download(
+                id = "http_1",
+                url = "https://hermes.example/export",
+                filename = "月次 report.csv"
+            )
+        )
+        assertThat(
+            BlobDownloadProtocol.parse(
+                """{"type":"download","id":"http_1","url":"https://hermes.example/export","filename":""}"""
+            )
+        ).isNull()
+        assertThat(
+            BlobDownloadProtocol.parse(
+                """{"type":"download","id":"http_1","url":"https://hermes.example/export\u0000","filename":"report"}"""
+            )
+        ).isNull()
+    }
 }

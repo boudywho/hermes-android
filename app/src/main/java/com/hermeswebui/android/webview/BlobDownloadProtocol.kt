@@ -12,6 +12,7 @@ internal object BlobDownloadProtocol {
     const val MAX_MESSAGE_CHARS = 100_000
     const val MAX_ID_CHARS = 64
     const val MAX_FILENAME_CHARS = 180
+    const val MAX_URL_CHARS = 4096
     const val MAX_MIME_CHARS = 120
     const val TRANSFER_TIMEOUT_MS = 30_000L
 
@@ -37,6 +38,11 @@ internal object BlobDownloadProtocol {
 
         data class Finish(override val id: String) : Message
         data class Abort(override val id: String) : Message
+        data class Download(
+            override val id: String,
+            val url: String,
+            val filename: String
+        ) : Message
     }
 
     fun parse(raw: String?): Message? {
@@ -56,6 +62,7 @@ internal object BlobDownloadProtocol {
             "chunk" -> parseChunk(json, id)
             "finish" -> Message.Finish(id).takeIf { json.length() == 2 }
             "abort" -> Message.Abort(id).takeIf { json.length() == 2 }
+            "download" -> parseDownload(json, id)
             else -> null
         }
     }
@@ -96,5 +103,14 @@ internal object BlobDownloadProtocol {
         if (sequenceNumber.toDouble() != sequence.toDouble() || sequence < 0) return null
         if (data.isEmpty() || data.length > maxEncodedChunkChars()) return null
         return Message.Chunk(id, sequence, data)
+    }
+
+    private fun parseDownload(json: JSONObject, id: String): Message.Download? {
+        if (json.length() != 4) return null
+        val url = json.opt("url") as? String ?: return null
+        val filename = json.opt("filename") as? String ?: return null
+        if (url.isBlank() || url.length > MAX_URL_CHARS || url.any(Char::isISOControl)) return null
+        if (filename.isBlank() || filename.length > MAX_FILENAME_CHARS) return null
+        return Message.Download(id, url, filename)
     }
 }

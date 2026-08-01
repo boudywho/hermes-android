@@ -31,7 +31,6 @@ import android.webkit.DownloadListener
 import android.webkit.PermissionRequest
 import android.webkit.ServiceWorkerController
 import android.webkit.SslErrorHandler
-import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -118,6 +117,7 @@ import com.hermeswebui.android.ui.web.WebShell
 import com.hermeswebui.android.webui.HermesWebUiScripts
 import com.hermeswebui.android.webview.HermesWebViewConfigurator
 import com.hermeswebui.android.webview.HermesBlobDownloadCoordinator
+import com.hermeswebui.android.webview.DownloadFilenameResolver
 import com.hermeswebui.android.webview.HermesThemeColorCoordinator
 import com.hermeswebui.android.webview.ThemeColorPolicy
 import com.hermeswebui.android.webview.WebViewRestorePolicy
@@ -406,11 +406,19 @@ class MainActivity : ComponentActivity() {
             onCancelAutoRetry = viewModel::cancelAutoRetry,
             onSetDebugLoggingEnabled = viewModel::setDebugLoggingEnabled
         )
-        blobDownloadCoordinator = HermesBlobDownloadCoordinator(this) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                legacyStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        blobDownloadCoordinator = HermesBlobDownloadCoordinator(
+            context = this,
+            requestLegacyStoragePermission = ::requestLegacyDownloadStoragePermission,
+            enqueueHttpDownload = { url, filename ->
+                enqueueHermesDownload(
+                    context = this,
+                    url = url,
+                    userAgent = webView.settings.userAgentString,
+                    requestedFilename = filename,
+                    requireConfiguredOrigin = true
+                )
             }
-        }
+        )
         themeColorCoordinator = HermesThemeColorCoordinator(::applyWebUiChromeColor)
         urlPolicy = UrlPolicy(viewModel.uiState.value.settings.allowedHosts)
 
@@ -1737,27 +1745,86 @@ class MainActivity : ComponentActivity() {
 
     private fun buildDownloadListener(context: Context): DownloadListener {
         return DownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            if (!urlPolicy.isAllowed(url)) {
-                Toast.makeText(context, "Blocked download from non-allowlisted domain", Toast.LENGTH_LONG).show()
-                return@DownloadListener
-            }
-            val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            enqueueHermesDownload(
+                context = context,
+                url = url,
+                userAgent = userAgent,
+                contentDisposition = contentDisposition,
+                mimeType = mimeType
+            )
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun enqueueHermesDownload(
+        context: Context,
+        url: String,
+        userAgent: String? = null,
+        contentDisposition: String? = null,
+        mimeType: String? = null,
+        requestedFilename: String? = null,
+        requireConfiguredOrigin: Boolean = false
+    ): Boolean {
+        if (!urlPolicy.isAllowed(url) ||
+            (requireConfiguredOrigin &&
+                !UrlOrigins.hasSameOrigin(url, viewModel.uiState.value.settings.serverUrl))
+        ) {
+            Toast.makeText(
+                context,
+                "Blocked download from non-allowlisted domain",
+                Toast.LENGTH_LONG
+            ).show()
+            return false
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestLegacyDownloadStoragePermission()
+            Toast.makeText(
+                context,
+                R.string.blob_download_storage_permission_required,
+                Toast.LENGTH_LONG
+            ).show()
+            return false
+        }
+
+        val fileName = DownloadFilenameResolver.resolve(
+            requestedFilename = requestedFilename,
+            contentDisposition = contentDisposition,
+            url = url,
+            mimeType = mimeType
+        )
+        val normalizedMime = DownloadFilenameResolver.normalizeMimeType(mimeType)
+        return try {
             val request = DownloadManager.Request(url.toUri()).apply {
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setTitle(fileName)
                 setDescription("Downloading from Hermes")
                 setAllowedOverMetered(true)
+                normalizedMime?.let { setMimeType(it) }
                 CookieManager.getInstance().getCookie(url)?.takeIf { it.isNotBlank() }?.let {
                     addRequestHeader("Cookie", it)
                 }
                 userAgent?.takeIf { it.isNotBlank() }?.let {
                     addRequestHeader("User-Agent", it)
                 }
-                setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
             }
-            val manager = context.getSystemService(DownloadManager::class.java)
-            manager.enqueue(request)
+            context.getSystemService(DownloadManager::class.java).enqueue(request)
             Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show()
+            true
+        } catch (_: RuntimeException) {
+            Toast.makeText(context, "Download failed to start", Toast.LENGTH_SHORT).show()
+            false
+        }
+    }
+
+    private fun requestLegacyDownloadStoragePermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            legacyStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 

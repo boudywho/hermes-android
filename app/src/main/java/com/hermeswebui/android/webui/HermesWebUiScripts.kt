@@ -44,11 +44,28 @@ object HermesWebUiScripts {
           };
           const notify = (detail) =>
             window.dispatchEvent(new CustomEvent("hermesnativedownload", { detail }));
-          const transfer = async (url, filename) => {
+          const createId = () => {
             const random = new Uint8Array(16);
             crypto.getRandomValues(random);
-            const id = Array.from(
+            return Array.from(
               random, value => value.toString(16).padStart(2, "0")).join("");
+          };
+          const requestHttpDownload = async (url, filename) => {
+            const id = createId();
+            try {
+              const status = await send({ type: "download", id, url, filename });
+              if (status.status !== "success") throw new Error("Download rejected");
+              notify({ id, status: "started", filename });
+            } catch (error) {
+              notify({
+                id,
+                status: "error",
+                message: error instanceof Error ? error.message : "Download failed"
+              });
+            }
+          };
+          const transfer = async (url, filename) => {
+            const id = createId();
             let started = false;
             try {
               const response = await fetch(url);
@@ -95,6 +112,11 @@ object HermesWebUiScripts {
                   transfer(url.href, filename);
                   return;
                 }
+                if ((url.protocol === "http:" || url.protocol === "https:") &&
+                    url.origin === window.location.origin && filename.trim() !== "") {
+                  requestHttpDownload(url.href, filename);
+                  return;
+                }
               } catch (_) {}
             }
             return originalClick.call(this);
@@ -107,9 +129,17 @@ object HermesWebUiScripts {
             if (anchor.target && anchor.target !== "_self" && anchor.target !== "_top") return;
             let url;
             try { url = new URL(anchor.href); } catch (_) { return; }
-            if (url.protocol !== "blob:") return;
-            event.preventDefault();
-            transfer(url.href, anchor.getAttribute("download") || "hermes-download");
+            const filename = anchor.getAttribute("download") || "";
+            if (url.protocol === "blob:") {
+              event.preventDefault();
+              transfer(url.href, filename || "hermes-download");
+              return;
+            }
+            if ((url.protocol === "http:" || url.protocol === "https:") &&
+                url.origin === window.location.origin && filename.trim() !== "") {
+              event.preventDefault();
+              requestHttpDownload(url.href, filename);
+            }
           }, true);
         })();
     """.trimIndent()

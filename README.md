@@ -127,7 +127,7 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 
 ### Real Android integration
 
-- File uploads and downloads, including direct camera capture and trusted `blob:` export streaming into Android Downloads
+- File uploads and public Downloads integration, including direct camera capture and trusted `blob:` export streaming; explicit WebUI filenames are preserved after safe path sanitization
 - Share-to-app intake for text and files
 - Android-backed browser notifications for Hermes WebUI alerts
 - Optional ongoing background monitoring with a passive foreground-service notification and trusted session activity updates when available

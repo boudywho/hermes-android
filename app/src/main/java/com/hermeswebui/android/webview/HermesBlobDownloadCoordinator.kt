@@ -10,8 +10,6 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
-import android.webkit.MimeTypeMap
-import android.webkit.URLUtil
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.webkit.JavaScriptReplyProxy
@@ -27,7 +25,8 @@ import java.util.Base64
 
 class HermesBlobDownloadCoordinator(
     private val context: Context,
-    private val requestLegacyStoragePermission: () -> Unit
+    private val requestLegacyStoragePermission: () -> Unit,
+    private val enqueueHttpDownload: (url: String, filename: String) -> Boolean
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var webView: WebView? = null
@@ -114,7 +113,22 @@ class HermesBlobDownloadCoordinator(
                 if (activeTransfer?.id == message.id) cancelActiveTransfer(showFailure = false)
                 sendStatus(reply, message.id, "aborted")
             }
+            is BlobDownloadProtocol.Message.Download -> download(message, reply)
         }
+    }
+
+    private fun download(
+        message: BlobDownloadProtocol.Message.Download,
+        reply: JavaScriptReplyProxy
+    ) {
+        if (!UrlOrigins.hasSameOrigin(message.url, configuredServerUrl)) {
+            sendStatus(reply, message.id, "error")
+            return
+        }
+        val accepted = runCatching {
+            enqueueHttpDownload(message.url, message.filename)
+        }.getOrDefault(false)
+        sendStatus(reply, message.id, if (accepted) "success" else "error")
     }
 
     private fun start(message: BlobDownloadProtocol.Message.Start, reply: JavaScriptReplyProxy) {
@@ -137,7 +151,11 @@ class HermesBlobDownloadCoordinator(
             ).show()
             return
         }
-        val filename = sanitizeFilename(message.filename, message.mime)
+        val filename = DownloadFilenameResolver.resolve(
+            requestedFilename = message.filename,
+            mimeType = message.mime,
+            fallbackBaseName = context.getString(R.string.blob_download_fallback_name)
+        )
         val target = createTarget(filename, message.mime)
         var uri: Uri? = null
         try {
@@ -284,26 +302,6 @@ class HermesBlobDownloadCoordinator(
         } catch (_: RuntimeException) {
             if (activeTransfer?.id == id) cancelActiveTransfer(showFailure = false)
         }
-    }
-
-    private fun sanitizeFilename(raw: String, mime: String): String {
-        val cleaned = raw
-            .substringAfterLast('/')
-            .substringAfterLast('\\')
-            .replace(Regex("[\\p{Cc}/\\\\:*?\"<>|]"), "_")
-            .trim()
-            .trim('.')
-            .take(BlobDownloadProtocol.MAX_FILENAME_CHARS)
-        val fallbackExtension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
-        val fallback = buildString {
-            append(context.getString(R.string.blob_download_fallback_name))
-            if (!fallbackExtension.isNullOrBlank()) append(".$fallbackExtension")
-        }
-        return URLUtil.guessFileName(
-            "https://localhost/${Uri.encode(cleaned.ifBlank { fallback })}",
-            null,
-            mime
-        ).take(BlobDownloadProtocol.MAX_FILENAME_CHARS)
     }
 
     @Suppress("DEPRECATION")
