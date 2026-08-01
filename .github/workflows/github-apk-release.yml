@@ -69,9 +69,9 @@ jobs:
           test -x "$apksigner_path" || { echo "apksigner was not found"; exit 1; }
           signer_report="$("$apksigner_path" verify --verbose --print-certs "$apk_path")"
           printf '%s\n' "$signer_report"
-          signer_count="$(printf '%s\n' "$signer_report" | grep -cE '^Signer #[0-9]+ certificate DN:')"
+          signer_count="$(printf '%s\n' "$signer_report" | grep -cE '^(Signer #[0-9]+ certificate DN:|V[0-9]+ Signer: certificate DN:)' || true)"
           test "$signer_count" = "1" || { echo "Expected exactly one APK signer, found $signer_count"; exit 1; }
-          actual_cert="$(printf '%s\n' "$signer_report" | sed -nE 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]')"
+          actual_cert="$(printf '%s\n' "$signer_report" | sed -nE -e 's/^Signer #1 certificate SHA-256 digest: //p' -e 's/^V[0-9]+ Signer: certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
           expected_cert="2eb2a635706fee7cc32100e5d98614d0c8cd0bc3ee8cd96421a69ee6c1290242"
           test "$actual_cert" = "$expected_cert" || { echo "APK signing certificate does not match the expected public release certificate"; exit 1; }
 
