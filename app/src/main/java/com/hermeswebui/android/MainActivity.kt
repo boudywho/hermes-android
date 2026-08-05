@@ -118,6 +118,7 @@ import com.hermeswebui.android.webui.HermesWebUiScripts
 import com.hermeswebui.android.webview.HermesWebViewConfigurator
 import com.hermeswebui.android.webview.HermesBlobDownloadCoordinator
 import com.hermeswebui.android.webview.DownloadFilenameResolver
+import com.hermeswebui.android.webview.FileChooserMimeTypes
 import com.hermeswebui.android.webview.HermesThemeColorCoordinator
 import com.hermeswebui.android.webview.ThemeColorPolicy
 import com.hermeswebui.android.webview.WebViewRestorePolicy
@@ -909,7 +910,9 @@ class MainActivity : ComponentActivity() {
                     this@MainActivity.filePathCallback = filePathCallback
                     pendingCameraCaptureUri = null
                     Toast.makeText(this@MainActivity, "Choose file(s) to upload", Toast.LENGTH_SHORT).show()
-                    if (shouldDirectCaptureImage(fileChooserParams)) {
+                    if (fileChooserParams?.isCaptureEnabled == true &&
+                        FileChooserMimeTypes.requestsImage(fileChooserParams.acceptTypes)
+                    ) {
                         val captureUri = createTempCameraCaptureUri()
                         if (captureUri != null) {
                             pendingCameraCaptureUri = captureUri
@@ -917,7 +920,9 @@ class MainActivity : ComponentActivity() {
                             return true
                         }
                     }
-                    filePickerLauncher.launch(normalizedMimeTypes(fileChooserParams))
+                    filePickerLauncher.launch(
+                        FileChooserMimeTypes.normalize(fileChooserParams?.acceptTypes)
+                    )
                     return true
                 }
             }
@@ -2101,23 +2106,6 @@ class MainActivity : ComponentActivity() {
         if (byteCount in 1..MaxSavedWebViewStateBytes) {
             outState.putBundle(WebViewStateKey, state)
         }
-    }
-
-    private fun shouldDirectCaptureImage(fileChooserParams: WebChromeClient.FileChooserParams?): Boolean {
-        if (fileChooserParams?.isCaptureEnabled != true) return false
-        val acceptTypes = fileChooserParams.acceptTypes.orEmpty()
-            .map { it.trim().lowercase() }
-            .filter { it.isNotBlank() }
-        if (acceptTypes.isEmpty()) return true
-        return acceptTypes.any { it == "image/*" || it.startsWith("image/") }
-    }
-
-    private fun normalizedMimeTypes(fileChooserParams: WebChromeClient.FileChooserParams?): Array<String> {
-        val acceptTypes = fileChooserParams?.acceptTypes.orEmpty()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-        return if (acceptTypes.isEmpty()) arrayOf("*/*") else acceptTypes.toTypedArray()
     }
 
     private fun createTempCameraCaptureUri(): Uri? {
