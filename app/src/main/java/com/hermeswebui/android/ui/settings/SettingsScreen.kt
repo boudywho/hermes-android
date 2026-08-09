@@ -828,7 +828,7 @@ fun SettingsScreen(
                                 },
                                 supportingContent = {
                                     Text(
-                                        text = "Beta: uses Hermes SSE endpoints for reconnect detection and falls back to polling if the server does not expose them.",
+                                        text = "Uses the persistent session stream for background activity updates, with reconnect polling as a fallback.",
                                         color = onSurfaceVar,
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -851,7 +851,7 @@ fun SettingsScreen(
                                 }
                             )
                             Text(
-                                text = "When you turn SSE transport on, Android checks support automatically. If support is unavailable, the toggle turns back off. Use 'Check SSE support now' for a manual re-check.",
+                                text = "Android uses /api/session/stream for the active authenticated session, the same persistent stream used by Hermes WebUI. The optional gateway check reports approval and notification extras; it does not disable session streaming by itself.",
                                 color = onSurfaceVar.copy(alpha = 0.72f),
                                 style = MaterialTheme.typography.labelSmall
                             )
@@ -873,11 +873,10 @@ fun SettingsScreen(
                                 }
                             }
                             if (!sseSupportStatus.isNullOrBlank()) {
-                                val isFeatureDisabled = sseSupportStatus.startsWith("🚫")
                                 val statusColor = when {
                                     sseSupportStatus.startsWith("✅") -> Color(0xFF4CAF50)
+                                    sseSupportStatus.startsWith("Info:") -> onSurfaceVar.copy(alpha = 0.9f)
                                     sseSupportStatus.startsWith("❔") -> onSurfaceVar.copy(alpha = 0.82f)
-                                    isFeatureDisabled -> MaterialTheme.colorScheme.error
                                     sseSupportStatus.startsWith("❌") -> MaterialTheme.colorScheme.error
                                     else -> onSurfaceVar.copy(alpha = 0.72f)
                                 }
@@ -886,27 +885,6 @@ fun SettingsScreen(
                                     color = statusColor,
                                     style = MaterialTheme.typography.labelSmall
                                 )
-                                if (isFeatureDisabled) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    OutlinedButton(
-                                        onClick = onCopySsePrompt,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
-                                        )
-                                    ) {
-                                        Text(
-                                            "📋  Copy enable-SSE prompt for Hermes",
-                                            color = MaterialTheme.colorScheme.error,
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                    Text(
-                                        text = "Paste this into the Hermes chat to ask it to set the flag and restart.",
-                                        color = onSurfaceVar.copy(alpha = 0.65f),
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                }
                             }
                         }
                     }

@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -74,10 +75,15 @@ class HermesReconnectService : Service() {
         activeIsReconnecting = isReconnecting
         activeShowFullTextOnLockScreen = showFullTextOnLockScreen
 
+        Log.i(
+            TAG,
+            "Background session monitor started: reconnecting=$isReconnecting, sessionStreamEnabled=$sseTransportEnabled, hasSession=${!sessionId.isNullOrBlank()}"
+        )
+
         val notification = buildNotification(
             pollIntervalSeconds = pollIntervalSeconds,
             contentText = currentNotificationBody.ifBlank {
-                defaultNotificationBody(pollIntervalSeconds, isReconnecting)
+                defaultNotificationBody(pollIntervalSeconds, isReconnecting, sseTransportEnabled)
             },
             targetUrl = currentNotificationTargetUrl ?: sessionTargetUrl,
             showFullTextOnLockScreen = showFullTextOnLockScreen,
@@ -265,9 +271,20 @@ class HermesReconnectService : Service() {
         }
     }
 
-    private fun defaultNotificationBody(pollIntervalSeconds: Int, isReconnecting: Boolean): String {
+    private fun defaultNotificationBody(
+        pollIntervalSeconds: Int,
+        isReconnecting: Boolean,
+        sseTransportEnabled: Boolean
+    ): String {
         if (!isReconnecting) {
-            return getString(R.string.reconnect_notification_body_activity)
+            return if (sseTransportEnabled) {
+                getString(R.string.reconnect_notification_body_session_stream)
+            } else {
+                getString(R.string.reconnect_notification_body_activity)
+            }
+        }
+        if (sseTransportEnabled) {
+            return getString(R.string.reconnect_notification_body_session_stream_reconnecting)
         }
         val normalizedInterval = pollIntervalSeconds.coerceAtLeast(1)
         return resources.getQuantityString(
@@ -585,6 +602,7 @@ class HermesReconnectService : Service() {
         private const val MAX_RESPONDED_APPROVAL_HISTORY = 64
         private const val ACTION_OPEN_NOTIFICATION_URL = "com.hermeswebui.android.OPEN_NOTIFICATION_URL"
         private const val EXTRA_NOTIFICATION_URL = "com.hermeswebui.android.extra.NOTIFICATION_URL"
+        private const val TAG = "HermesReconnectService"
 
         fun start(
             context: Context,

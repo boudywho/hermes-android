@@ -88,20 +88,21 @@ object HermesApiClient {
      * regardless of this flag. This capability enum classifies the probe response, not whether
      * session streaming itself is functional.
      */
-    enum class SseCapability {
+    enum class SseCapability(val keepsSessionTransportEnabled: Boolean) {
         /** The WebUI gateway/session SSE probe reports the feature enabled and healthy. */
-        SESSION_SSE_ENABLED,
+        SESSION_SSE_ENABLED(true),
         /** The lightweight reconnect SSE stream is available, even if gateway/session SSE is not. */
-        RECONNECT_STREAM_AVAILABLE,
+        RECONNECT_STREAM_AVAILABLE(true),
         /**
          * The probe reported the gateway/session SSE feature disabled on this server.
          * This is the common "agent sessions not enabled" case and should be
-         * presented with a clear server-settings message rather than a generic error.
-         * Note: `/api/session/stream` may still be functional despite this probe result.
+         * presented as unavailable gateway extras rather than a generic transport failure.
+         * The persistent `/api/session/stream` endpoint may still be functional, so preserve the
+         * user's session-stream transport preference and let its authenticated connection decide.
          */
-        FEATURE_DISABLED,
+        FEATURE_DISABLED(true),
         /** No SSE capability detected (network error or unexpected server response). */
-        NONE
+        NONE(false)
     }
 
     /** The prompt text a user can paste into Hermes chat to ask it to enable session SSE. */

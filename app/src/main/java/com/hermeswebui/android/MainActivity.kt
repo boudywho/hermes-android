@@ -1302,16 +1302,16 @@ class MainActivity : ComponentActivity() {
                     ).show()
                 }
                 HermesApiClient.SseCapability.FEATURE_DISABLED -> {
-                    if (disableIfUnavailable) {
-                        viewModel.setSseTransportEnabled(false)
+                    if (enableIfAvailable) {
+                        viewModel.setSseTransportEnabled(true)
                     }
                     viewModel.setSseSupportStatus(
-                        "🚫  SSE not supported on this server right now. Gateway/session SSE is off and the reconnect stream was not detected." +
-                            if (disableIfUnavailable) " SSE transport was turned off." else ""
+                        "Info: Gateway SSE extras are unavailable. Android will still try the authenticated " +
+                            "/api/session/stream for the active session; the lightweight reconnect probe was not detected."
                     )
                     Toast.makeText(
                         this@MainActivity,
-                        "Gateway/session SSE not enabled on this server — see settings for how to turn it on.",
+                        "Gateway SSE extras unavailable; session streaming remains enabled.",
                         Toast.LENGTH_LONG
                     ).show()
                 }

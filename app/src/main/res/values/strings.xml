@@ -5,6 +5,8 @@
     <string name="action_edit_server_url">Edit server URL</string>
     <string name="reconnect_notification_title">Hermes activity is running in the background</string>
     <string name="reconnect_notification_body_activity">Watching the current Hermes session for safe activity updates.</string>
+    <string name="reconnect_notification_body_session_stream">Live session updates are active in the background.</string>
+    <string name="reconnect_notification_body_session_stream_reconnecting">Using live session updates while Hermes reconnects.</string>
     <string name="reconnect_notification_body_public_activity">Hermes is working in the background.</string>
     <string name="reconnect_notification_body_public_reconnecting">Hermes is trying to reconnect in the background.</string>
     <string name="approval_action_deny">Deny</string>
