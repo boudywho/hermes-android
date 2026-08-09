@@ -78,6 +78,15 @@ object HermesApiClient {
 
     /**
      * Describes the SSE capability level detected on the server.
+     *
+     * STRATEGY: The Android app maintains a fallback chain for session updates:
+     * 1. Primary: `/api/session/stream` (persistent SSE across agent turns, same as WebUI uses)
+     * 2. Fallback: lightweight polling when SSE is unavailable
+     *
+     * The gateway/session SSE probe only reports whether the server has explicitly enabled
+     * "agent sessions" mode; the persistent `/api/session/stream` endpoint may be available
+     * regardless of this flag. This capability enum classifies the probe response, not whether
+     * session streaming itself is functional.
      */
     enum class SseCapability {
         /** The WebUI gateway/session SSE probe reports the feature enabled and healthy. */
@@ -88,6 +97,7 @@ object HermesApiClient {
          * The probe reported the gateway/session SSE feature disabled on this server.
          * This is the common "agent sessions not enabled" case and should be
          * presented with a clear server-settings message rather than a generic error.
+         * Note: `/api/session/stream` may still be functional despite this probe result.
          */
         FEATURE_DISABLED,
         /** No SSE capability detected (network error or unexpected server response). */
@@ -96,10 +106,10 @@ object HermesApiClient {
 
     /** The prompt text a user can paste into Hermes chat to ask it to enable session SSE. */
     const val SSE_ENABLE_HERMES_PROMPT =
-        "Please enable Hermes WebUI agent sessions / gateway SSE on this server. " +
-        "Turn on the server setting that exposes /api/sessions/gateway/stream " +
-        "(the probe currently reports 'agent sessions not enabled'), then restart Hermes if needed. " +
-        "After that, re-run the Android app's SSE support check."
+        "Please enable Hermes WebUI agent sessions on this server. " +
+        "Enable the server setting that exposes gateway/session SSE (currently reports 'agent sessions not enabled'), " +
+        "restart Hermes if needed, then re-run the Android app's SSE support check. " +
+        "(Note: the app uses /api/session/stream for persistent session updates; this setting affects the gateway probe response and advanced approval features.)"
 
     internal data class GatewayProbeResult(
         val httpStatus: Int,

@@ -397,6 +397,9 @@ class HermesReconnectService : Service() {
             return
         }
 
+        // Connect to the persistent /api/session/stream endpoint for real-time session updates.
+        // This is the same endpoint the Hermes WebUI frontend uses for live chat rendering.
+        // It remains open across multiple agent turns and provides durable session-scoped events.
         val encodedSessionId = runCatching { URLEncoder.encode(sessionId, Charsets.UTF_8.name()) }.getOrNull() ?: return
         val url = runCatching {
             URI(baseUrl.trimEnd('/')).resolve("/api/session/stream?session_id=$encodedSessionId").toURL()
