@@ -59,6 +59,7 @@ class HermesApiClientSseCapabilityTest {
         )
 
         assertThat(result).isEqualTo(HermesApiClient.SseCapability.FEATURE_DISABLED)
+    assertThat(result.keepsSessionTransportEnabled).isTrue()
     }
 
     @Test
@@ -87,5 +88,6 @@ class HermesApiClientSseCapabilityTest {
         )
 
         assertThat(result).isEqualTo(HermesApiClient.SseCapability.NONE)
+    assertThat(result.keepsSessionTransportEnabled).isFalse()
     }
 }
