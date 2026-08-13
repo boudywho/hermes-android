@@ -886,7 +886,11 @@ class MainActivity : ComponentActivity() {
                     applyHermesWebViewCompatibilityFixes(view, url)
                     viewModel.onPageFinished(
                         url = url,
-                        rememberLastUrl = !matchesConfiguredDashboardRoute(url)
+                        // Persist only trusted Hermes WebUI routes as the cold-start URL.
+                        // OAuth provider pages (non-allowlisted in-app IdP hosts) must not be
+                        // restored on launch: the flow is gone and the page needs the OAuth
+                        // context to render.
+                        rememberLastUrl = matchesConfiguredWebUiRoute(url)
                     )
                     CookieManager.getInstance().flush()
                 }
@@ -1508,12 +1512,23 @@ class MainActivity : ComponentActivity() {
 
     private fun applyHermesWebViewCompatibilityFixes(view: WebView?, url: String?) {
         if (view == null) return
-        if (!matchesConfiguredWebUiRoute(url ?: viewModel.uiState.value.currentUrl)) return
+        val effectiveUrl = url ?: viewModel.uiState.value.currentUrl
+        if (matchesConfiguredWebUiRoute(effectiveUrl)) {
+            // Android WebView can report supported dynamic viewport units while computing them as 0px.
+            // Hermes WebUI uses 100dvh for the root flex shell (and 100vh max-height for floating
+            // menus), so force the measured viewport height for both.
+            applyHermesWebUiRuntimeScripts(view)
+            return
+        }
 
-        // Android WebView can report supported dynamic viewport units while computing them as 0px.
-        // Hermes WebUI uses 100dvh for the root flex shell (and 100vh max-height for floating
-        // menus), so force the measured viewport height for both.
-        applyHermesWebUiRuntimeScripts(view)
+        // In-app OAuth provider pages render in this same WebView, so they hit the same
+        // viewport-unit (vh/dvh = 0px) collapse, but the WebUI-origin document-start shims do
+        // not cover provider origins. Apply only the generic viewport polyfill while a verified
+        // OAuth flow is active (e.g. the Nous portal login root uses h-screen and would
+        // otherwise collapse to a blank page).
+        if (activeMainFrameOAuthFlow != null && isHttpOrHttpsUrl(effectiveUrl)) {
+            view.evaluateJavascript(HermesWebUiScripts.viewportFixScript, null)
+        }
     }
 
     private fun applyHermesWebUiRuntimeScripts(view: WebView) {
@@ -1744,10 +1759,13 @@ class MainActivity : ComponentActivity() {
     private fun preflightConfiguredStartupServer(serverUrl: String) {
         val lastLoadedUrl = settingsRepository.getLastLoadedUrl()
         val notificationUrl = notificationPresenter.notificationTargetUrl(intent)
-        val startUrl = notificationUrl ?: if (matchesConfiguredDashboardRoute(lastLoadedUrl)) {
-            serverUrl
+        // Restore only trusted Hermes WebUI routes; fall back to the server root for
+        // dashboard-origin pages and for stale non-WebUI URLs (e.g. OAuth provider pages
+        // persisted by older builds mid-flow).
+        val startUrl = notificationUrl ?: if (lastLoadedUrl != null && matchesConfiguredWebUiRoute(lastLoadedUrl)) {
+            lastLoadedUrl
         } else {
-            lastLoadedUrl ?: serverUrl
+            serverUrl
         }
         if (shouldRequireVpnForServerUrl(serverUrl) && !isVpnTransportActive()) {
             queueVpnGuardedLoad(
