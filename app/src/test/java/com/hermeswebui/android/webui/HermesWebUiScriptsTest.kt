@@ -113,6 +113,17 @@ class HermesWebUiScriptsTest {
     }
 
     @Test
+    fun `viewport fix script repairs only expanded clarification card and inner scroller`() {
+        val script = HermesWebUiScripts.viewportFixScript
+
+        assertThat(script).contains("compactClarification ? 360 : 420")
+        assertThat(script).contains(".clarify-card.visible:not(.collapsed), .clarify-card.visible:not(.collapsed) .clarify-inner")
+        assertThat(script).contains(".clarify-card.visible:not(.collapsed) .clarify-inner { overflow-y: auto !important; }")
+        assertThat(script).contains("without touching its dock")
+        assertThat(script).doesNotContain(".clarify-card.collapsed {")
+    }
+
+    @Test
     fun `viewport fix script keeps visible repaired panels from oscillating`() {
         val script = HermesWebUiScripts.viewportFixScript
 

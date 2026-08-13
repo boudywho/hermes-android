@@ -310,6 +310,12 @@ object HermesWebUiScripts {
 
           function injectBaselineCSS(viewport) {
             var px = Math.round(viewport.height) + 'px';
+            var compactClarification = viewport.width > 0 && viewport.width <= 600;
+            var clarificationMax = Math.max(180, Math.min(
+              compactClarification ? 360 : 420,
+              Math.round(viewport.height * (compactClarification ? 0.62 : 0.68)),
+              Math.round(viewport.height) - (compactClarification ? 180 : 220)
+            )) + 'px';
 
             // Inject CSS custom properties on :root for potential future use
             var root = document.documentElement;
@@ -333,6 +339,11 @@ object HermesWebUiScripts {
               'body { overflow-x: hidden !important; }',
               // Flex container helpers - prevent min-height inheritance issues
               '.layout, .rail, .sidebar, #sessionList, .messages { min-height: 0 !important; }',
+              // The clarification scroller lives inside .messages, which is intentionally
+              // excluded from generic repair to avoid streaming-chat flicker. Mirror the
+              // WebUI's expanded viewport cap in measured pixels without touching its dock.
+              '.clarify-card.visible:not(.collapsed), .clarify-card.visible:not(.collapsed) .clarify-inner { max-height: ' + clarificationMax + ' !important; }',
+              '.clarify-card.visible:not(.collapsed) .clarify-inner { overflow-y: auto !important; }',
               // Settings page clip fix
               (viewport.width > 0 && viewport.width <= 600
                 ? '.main.showing-settings .main-view { max-height: none !important; overflow-y: auto !important; }'
