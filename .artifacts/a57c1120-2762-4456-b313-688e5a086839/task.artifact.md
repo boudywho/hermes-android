@@ -1,0 +1,7 @@
+- `[x]` Broaden OAuth recognition in `OAuthPopupFlow.kt`
+- `[x]` Implement scheme-insensitive origin matching in `UrlPolicy.kt`
+- `[x]` Force popup OAuth flows into the main visible WebView in `MainActivity.kt`
+- `[x]` Enable mixed content compatibility in `HermesWebViewConfigurator.kt`
+- `[x]` Update `OAuthPopupFlowTest.kt` and verify tests
+- `[x]` Clean up API level 33 dependencies and unused imports
+- `[x]` Verify changes with a local build

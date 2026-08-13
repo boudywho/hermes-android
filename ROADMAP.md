@@ -3,7 +3,7 @@
 > Maintenance-focused Android wrapper for Hermes Web UI. The core wrapper is
 > good as-is; product UI and workflow changes belong in Hermes WebUI.
 >
-> Last updated: 2026-08-09
+> Last updated: 2026-08-13
 
 ---
 
@@ -238,3 +238,4 @@ sketches are captured inline below.
 | BUG-038 | 2026-08-01 | UI | Fixed Issue 55 light-theme system bar contrast by applying theme-aware status bar icon appearance at runtime (dark icons in light mode, light icons in dark mode), so Android status bar text/icons remain readable over the WebView shell background. |
 | BUG-039 | 2026-08-09 | Settings / Connectivity | Fixed Issue 61 false "UNREACHABLE" classification by hardening server readiness probing: when `/api/status` fails with a transport exception, Android now probes the root page and accepts Hermes fingerprint matches as reachable before failing closed. Also improved loopback diagnostics so `localhost`/`127.0.0.1` clearly explain that they target the Android device itself and should be replaced with a LAN host/IP. |
 | BUG-040 | 2026-08-09 | WebView | Fixed Issue 59 blank main-pane text regression by refining the Android viewport polyfill chat-surface guard: the script now keeps descendant chat nodes excluded (to avoid per-message style churn) but allows the top-level `.messages` container itself to be repaired when collapsed by the WebView vh/dvh bug. This restores visible conversation content while retaining anti-flicker behavior. |
+| BUG-041 | 2026-08-13 | Authentication | Fixed Issue 66 OAuth login sidebar-only rendering by skipping dashboard Custom Tab routing for the immediate post-callback navigation: after an OAuth callback is verified and cleared, Android sets a flag to bypass dashboard matching for the server's subsequent 302 redirect, allowing the redirect destination to load in the main WebView instead of being externalized to Custom Tab. The flag resets after one navigation so subsequent dashboard routes continue to route normally. |

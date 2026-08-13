@@ -388,9 +388,17 @@ object HermesWebUiScripts {
 
             // Quick filters - skip obviously fine elements
             if (rect.width < 100) return false;
-            if (rect.height <= 0) return false;
-            if (rect.height >= viewport.height * 0.25) return false;
-            if (rect.height >= scrollHeight * 0.8) return false;
+            if (rect.height <= 0) {
+              // The vh/dvh=0 bug can zero out full-page app shells entirely (e.g.
+              // `h-screen` root containers on OAuth provider pages). Only repair
+              // zero-height elements that hide substantial page-level content, so
+              // small spacers and intentionally collapsed widgets are left alone.
+              var minShellContent = Math.max(200, Math.round(viewport.height * 0.3));
+              if (scrollHeight < minShellContent) return false;
+            } else {
+              if (rect.height >= viewport.height * 0.25) return false;
+              if (rect.height >= scrollHeight * 0.8) return false;
+            }
 
             // Collapsed threshold
             var collapsedThreshold = Math.max(48, Math.min(180, Math.round(viewport.height * 0.16)));

@@ -45,7 +45,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -236,6 +235,7 @@ class MainActivity : ComponentActivity() {
     private var activeMainFrameOAuthFlow: OAuthPopupFlow? = null
     private var oauthFlowTimeoutMs: Long = 0
     private val OAUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000L // 5 minutes
+    private var shouldSkipDashboardMatchNextNavigation: Boolean = false
 
     // Popups created by onCreateWindow that have not yet been destroyed. A window.open('') that
     // never navigates never reaches the popup's shouldOverrideUrlLoading/onPageStarted, so it would
@@ -972,7 +972,11 @@ class MainActivity : ComponentActivity() {
                     applyHermesWebViewCompatibilityFixes(view, url)
                     viewModel.onPageFinished(
                         url = url,
-                        rememberLastUrl = !matchesConfiguredDashboardRoute(url)
+                        // Persist only trusted Hermes WebUI routes as the cold-start URL.
+                        // OAuth provider pages (non-allowlisted in-app IdP hosts) must not be
+                        // restored on launch: the flow is gone and the page needs the OAuth
+                        // context to render.
+                        rememberLastUrl = matchesConfiguredWebUiRoute(url)
                     )
                     CookieManager.getInstance().flush()
                     if (matchesConfiguredWebUiRoute(url) && url?.let(urlPolicy::isAllowed) == true) {
@@ -1105,7 +1109,6 @@ class MainActivity : ComponentActivity() {
                 val target = request?.url?.toString() ?: return true
                 return handlePopupNavigation(
                     popup = popup,
-                    sourceView = view,
                     target = target
                 )
             }
@@ -1125,7 +1128,6 @@ class MainActivity : ComponentActivity() {
 
     private fun handlePopupNavigation(
         popup: WebView,
-        sourceView: WebView?,
         target: String
     ): Boolean {
         if (handleAppSettingsNavigation(target)) {
@@ -1143,8 +1145,10 @@ class MainActivity : ComponentActivity() {
 
         val flow = parseTrustedOAuthStart(target)
         if (flow != null) {
-            rememberActiveOAuthPopup(popup, flow)
-            sourceView?.loadUrl(target)
+            // Move popup OAuth flows to the main frame so they are visible and interactive.
+            rememberActiveMainFrameOAuth(flow)
+            webView.loadUrl(target)
+            destroyPopup(popup)
             return true
         }
 
@@ -1170,7 +1174,10 @@ class MainActivity : ComponentActivity() {
 
         val startedFlow = parseTrustedOAuthStart(url)
         if (startedFlow != null) {
-            rememberActiveOAuthPopup(popup, startedFlow)
+            // Move popup OAuth flows to the main frame so they are visible and interactive.
+            rememberActiveMainFrameOAuth(startedFlow)
+            webView.loadUrl(url)
+            destroyPopup(popup)
             return
         }
 
@@ -1190,6 +1197,8 @@ class MainActivity : ComponentActivity() {
         val activeTopLevelFlow = activeMainFrameOAuthFlow
         if (activeTopLevelFlow?.isVerifiedCallbackUrl(target) == true) {
             clearActiveMainFrameOAuth()
+            // Skip dashboard matching for the immediate next navigation (OAuth redirect)
+            shouldSkipDashboardMatchNextNavigation = true
             return false
         }
 
@@ -1218,7 +1227,11 @@ class MainActivity : ComponentActivity() {
             clearActiveMainFrameOAuth()
         }
 
-        if (matchesConfiguredDashboardRoute(target)) {
+        // Skip dashboard matching if we just cleared an OAuth callback (the server's
+        // redirect response should load in the main WebView, not Custom Tab).
+        val skipDashboardMatch = shouldSkipDashboardMatchNextNavigation
+        shouldSkipDashboardMatchNextNavigation = false
+        if (!skipDashboardMatch && matchesConfiguredDashboardRoute(target)) {
             openDashboardInCustomTab(target)
             return true
         }
@@ -1599,12 +1612,23 @@ class MainActivity : ComponentActivity() {
 
     private fun applyHermesWebViewCompatibilityFixes(view: WebView?, url: String?) {
         if (view == null) return
-        if (!matchesConfiguredWebUiRoute(url ?: viewModel.uiState.value.currentUrl)) return
+        val effectiveUrl = url ?: viewModel.uiState.value.currentUrl
+        if (matchesConfiguredWebUiRoute(effectiveUrl)) {
+            // Android WebView can report supported dynamic viewport units while computing them as 0px.
+            // Hermes WebUI uses 100dvh for the root flex shell (and 100vh max-height for floating
+            // menus), so force the measured viewport height for both.
+            applyHermesWebUiRuntimeScripts(view)
+            return
+        }
 
-        // Android WebView can report supported dynamic viewport units while computing them as 0px.
-        // Hermes WebUI uses 100dvh for the root flex shell (and 100vh max-height for floating
-        // menus), so force the measured viewport height for both.
-        applyHermesWebUiRuntimeScripts(view)
+        // In-app OAuth provider pages render in this same WebView, so they hit the same
+        // viewport-unit (vh/dvh = 0px) collapse, but the WebUI-origin document-start shims do
+        // not cover provider origins. Apply only the generic viewport polyfill while a verified
+        // OAuth flow is active (e.g. the Nous portal login root uses h-screen and would
+        // otherwise collapse to a blank page).
+        if (activeMainFrameOAuthFlow != null && isHttpOrHttpsUrl(effectiveUrl)) {
+            view.evaluateJavascript(HermesWebUiScripts.viewportFixScript, null)
+        }
     }
 
     private fun applyHermesWebUiRuntimeScripts(view: WebView) {
@@ -1927,10 +1951,13 @@ class MainActivity : ComponentActivity() {
     private fun preflightConfiguredStartupServer(serverUrl: String) {
         val lastLoadedUrl = settingsRepository.getLastLoadedUrl()
         val notificationUrl = notificationPresenter.notificationTargetUrl(intent)
-        val startUrl = notificationUrl ?: if (matchesConfiguredDashboardRoute(lastLoadedUrl)) {
-            serverUrl
+        // Restore only trusted Hermes WebUI routes; fall back to the server root for
+        // dashboard-origin pages and for stale non-WebUI URLs (e.g. OAuth provider pages
+        // persisted by older builds mid-flow).
+        val startUrl = notificationUrl ?: if (lastLoadedUrl != null && matchesConfiguredWebUiRoute(lastLoadedUrl)) {
+            lastLoadedUrl
         } else {
-            lastLoadedUrl ?: serverUrl
+            serverUrl
         }
         if (shouldRequireVpnForServerUrl(serverUrl) && !isVpnTransportActive()) {
             queueVpnGuardedLoad(
@@ -2348,13 +2375,6 @@ class MainActivity : ComponentActivity() {
                 { it.packageName.lowercase() }
             )
         )
-    }
-
-    private fun rememberActiveOAuthPopup(popup: WebView, flow: OAuthPopupFlow) {
-        activeOAuthPopup = popup
-        activeOAuthFlow = flow
-        setOAuthThirdPartyCookiesEnabled(true)
-        refreshActiveOAuthTimeout()
     }
 
     private fun rememberActiveMainFrameOAuth(flow: OAuthPopupFlow) {

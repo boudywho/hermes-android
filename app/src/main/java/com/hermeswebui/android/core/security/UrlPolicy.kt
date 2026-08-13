@@ -51,7 +51,7 @@ object UrlOrigins {
         return url.toUriOrNull()?.normalizedHost()?.takeIf { it.isNotBlank() }
     }
 
-    fun hasSameOrigin(url: String?, baseUrl: String): Boolean {
+    fun hasSameOrigin(url: String?, baseUrl: String, ignoreScheme: Boolean = false): Boolean {
         if (url.isNullOrBlank() || baseUrl.isBlank()) return false
         val target = url.toUriOrNull() ?: return false
         val base = baseUrl.toUriOrNull() ?: return false
@@ -59,10 +59,20 @@ object UrlOrigins {
         val baseScheme = base.scheme?.lowercase(Locale.US) ?: return false
         val targetHost = target.normalizedHost() ?: return false
         val baseHost = base.normalizedHost() ?: return false
-        return targetScheme == baseScheme &&
+
+        val schemesMatch = ignoreScheme || targetScheme == baseScheme
+        val targetPort = target.effectivePort()
+        val basePort = base.effectivePort()
+
+        // When ignoring scheme, we also allow the standard web ports (80/443) to be equivalent.
+        val portsMatch = targetPort == basePort || (ignoreScheme && isStandardWebPort(targetPort) && isStandardWebPort(basePort))
+
+        return schemesMatch &&
             targetHost == baseHost &&
-            target.effectivePort() == base.effectivePort()
+            portsMatch
     }
+
+    private fun isStandardWebPort(port: Int): Boolean = port == 80 || port == 443
 
     fun documentStartOriginRule(url: String): String? {
         val uri = url.toUriOrNull() ?: return null

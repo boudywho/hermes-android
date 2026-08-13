@@ -15,8 +15,31 @@ class OAuthPopupFlowTest {
     }
 
     @Test
-    fun `parseAuthorizationStart rejects urls without oauth code flow markers`() {
+    fun `parseAuthorizationStart recognizes oauth flow by core parameters only`() {
         val flow = OAuthPopupFlow.parseAuthorizationStart(
+            "https://custom-auth.internal/login?response_type=code&client_id=hermes&redirect_uri=http%3A%2F%2F192.168.1.50%3A8080%2Fcallback"
+        )
+
+        assertThat(flow).isNotNull()
+        assertThat(flow?.redirectUri).isEqualTo("http://192.168.1.50:8080/callback")
+    }
+
+    @Test
+    fun `parseAuthorizationStart recognizes additional path markers`() {
+        assertThat(OAuthPopupFlow.parseAuthorizationStart(
+            "https://auth.internal/auth?response_type=code&client_id=x&redirect_uri=http%3A%2F%2Flocalhost%2F"
+        )).isNotNull()
+        assertThat(OAuthPopupFlow.parseAuthorizationStart(
+            "https://auth.internal/login?response_type=code&client_id=x&redirect_uri=http%3A%2F%2Flocalhost%2F"
+        )).isNotNull()
+        assertThat(OAuthPopupFlow.parseAuthorizationStart(
+            "https://auth.internal/sso?response_type=code&client_id=x&redirect_uri=http%3A%2F%2Flocalhost%2F"
+        )).isNotNull()
+    }
+
+    @Test
+    fun `parseAuthorizationStart rejects urls without oauth code flow indicators`() {
+  val flow = OAuthPopupFlow.parseAuthorizationStart(
             "https://agent.racci.dev/settings?redirect_uri=https%3A%2F%2Fagent.racci.dev%2Fauth%2Fcallback&client_id=hermes"
         )
 
@@ -37,14 +60,14 @@ class OAuthPopupFlowTest {
     }
 
     @Test
-    fun `authorization start reports whether redirect returns to configured Hermes origin`() {
+    fun `authorization start reports whether redirect returns to configured Hermes origin with scheme leniency`() {
         val flow = OAuthPopupFlow.parseAuthorizationStart(
             "https://auth.racci.dev/ui/oauth2?response_type=code&client_id=hermes&redirect_uri=https%3A%2F%2Fagent.racci.dev%2Fauth%2Fcallback&scope=openid&state=test-state"
         )
 
         assertThat(flow?.redirectsToOrigin("https://agent.racci.dev")).isTrue()
         assertThat(flow?.redirectsToOrigin("https://agent.racci.dev/")).isTrue()
-        assertThat(flow?.redirectsToOrigin("http://agent.racci.dev")).isFalse()
+        assertThat(flow?.redirectsToOrigin("http://agent.racci.dev")).isTrue()
         assertThat(flow?.redirectsToOrigin("https://other.racci.dev")).isFalse()
     }
 }
