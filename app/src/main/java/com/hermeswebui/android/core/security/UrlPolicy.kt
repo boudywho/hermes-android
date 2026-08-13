@@ -61,10 +61,18 @@ object UrlOrigins {
         val baseHost = base.normalizedHost() ?: return false
 
         val schemesMatch = ignoreScheme || targetScheme == baseScheme
+        val targetPort = target.effectivePort()
+        val basePort = base.effectivePort()
+
+        // When ignoring scheme, we also allow the standard web ports (80/443) to be equivalent.
+        val portsMatch = targetPort == basePort || (ignoreScheme && isStandardWebPort(targetPort) && isStandardWebPort(basePort))
+
         return schemesMatch &&
             targetHost == baseHost &&
-            target.effectivePort() == base.effectivePort()
+            portsMatch
     }
+
+    private fun isStandardWebPort(port: Int): Boolean = port == 80 || port == 443
 
     fun documentStartOriginRule(url: String): String? {
         val uri = url.toUriOrNull() ?: return null
