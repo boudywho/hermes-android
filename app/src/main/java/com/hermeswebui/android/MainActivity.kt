@@ -219,6 +219,7 @@ class MainActivity : ComponentActivity() {
     private var activeMainFrameOAuthFlow: OAuthPopupFlow? = null
     private var oauthFlowTimeoutMs: Long = 0
     private val OAUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000L // 5 minutes
+    private var shouldSkipDashboardMatchNextNavigation: Boolean = false
 
     // Popups created by onCreateWindow that have not yet been destroyed. A window.open('') that
     // never navigates never reaches the popup's shouldOverrideUrlLoading/onPageStarted, so it would
@@ -1103,6 +1104,8 @@ class MainActivity : ComponentActivity() {
         val activeTopLevelFlow = activeMainFrameOAuthFlow
         if (activeTopLevelFlow?.isVerifiedCallbackUrl(target) == true) {
             clearActiveMainFrameOAuth()
+            // Skip dashboard matching for the immediate next navigation (OAuth redirect)
+            shouldSkipDashboardMatchNextNavigation = true
             return false
         }
 
@@ -1131,7 +1134,11 @@ class MainActivity : ComponentActivity() {
             clearActiveMainFrameOAuth()
         }
 
-        if (matchesConfiguredDashboardRoute(target)) {
+        // Skip dashboard matching if we just cleared an OAuth callback (the server's
+        // redirect response should load in the main WebView, not Custom Tab).
+        val skipDashboardMatch = shouldSkipDashboardMatchNextNavigation
+        shouldSkipDashboardMatchNextNavigation = false
+        if (!skipDashboardMatch && matchesConfiguredDashboardRoute(target)) {
             openDashboardInCustomTab(target)
             return true
         }
