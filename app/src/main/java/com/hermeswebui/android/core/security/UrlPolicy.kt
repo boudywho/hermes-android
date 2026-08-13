@@ -51,7 +51,7 @@ object UrlOrigins {
         return url.toUriOrNull()?.normalizedHost()?.takeIf { it.isNotBlank() }
     }
 
-    fun hasSameOrigin(url: String?, baseUrl: String): Boolean {
+    fun hasSameOrigin(url: String?, baseUrl: String, ignoreScheme: Boolean = false): Boolean {
         if (url.isNullOrBlank() || baseUrl.isBlank()) return false
         val target = url.toUriOrNull() ?: return false
         val base = baseUrl.toUriOrNull() ?: return false
@@ -59,7 +59,9 @@ object UrlOrigins {
         val baseScheme = base.scheme?.lowercase(Locale.US) ?: return false
         val targetHost = target.normalizedHost() ?: return false
         val baseHost = base.normalizedHost() ?: return false
-        return targetScheme == baseScheme &&
+
+        val schemesMatch = ignoreScheme || targetScheme == baseScheme
+        return schemesMatch &&
             targetHost == baseHost &&
             target.effectivePort() == base.effectivePort()
     }

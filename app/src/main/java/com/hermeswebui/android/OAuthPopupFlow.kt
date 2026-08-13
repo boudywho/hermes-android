@@ -3,7 +3,6 @@ package com.hermeswebui.android
 import com.hermeswebui.android.core.security.UrlOrigins
 import java.net.URI
 import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 data class OAuthPopupFlow(
@@ -27,14 +26,12 @@ data class OAuthPopupFlow(
     }
 
     fun redirectsToOrigin(baseUrl: String): Boolean {
-        return UrlOrigins.hasSameOrigin(redirectUri, baseUrl)
+        return UrlOrigins.hasSameOrigin(redirectUri, baseUrl, ignoreScheme = true)
     }
 
     private fun matchesEndpoint(target: URI, url: String): Boolean {
-        if (!target.scheme.equals(redirectScheme, ignoreCase = true)) return false
-
         if (redirectOrigin != null) {
-            if (!UrlOrigins.hasSameOrigin(url, redirectOrigin)) return false
+            if (!UrlOrigins.hasSameOrigin(url, redirectOrigin, ignoreScheme = true)) return false
         } else {
             val targetHost = target.host?.lowercase(Locale.US)
             if (targetHost != redirectHost) return false
@@ -54,10 +51,20 @@ data class OAuthPopupFlow(
             if (!responseType.split(' ', '+').contains("code")) return null
             if (clientId.isBlank()) return null
 
-            val flowMarkersPresent = params.containsKey("state") ||
+            val hasCoreParams = params.containsKey("response_type") &&
+                params.containsKey("client_id") &&
+                params.containsKey("redirect_uri")
+
+            val path = uri.path.orEmpty().lowercase(Locale.US)
+            val flowMarkersPresent = hasCoreParams ||
+                params.containsKey("state") ||
                 params.containsKey("code_challenge") ||
-                uri.path.orEmpty().contains("oauth", ignoreCase = true) ||
-                uri.path.orEmpty().contains("authorize", ignoreCase = true)
+                path.contains("oauth") ||
+                path.contains("authorize") ||
+                path.contains("auth") ||
+                path.contains("login") ||
+                path.contains("sso")
+
             if (!flowMarkersPresent) return null
 
             val callback = redirectUri.toUriOrNull() ?: return null
@@ -96,7 +103,7 @@ data class OAuthPopupFlow(
         }
 
         private fun String.decodeUrlComponent(): String {
-            return URLDecoder.decode(this, StandardCharsets.UTF_8)
+            return URLDecoder.decode(this, "UTF-8")
         }
 
         private fun String.toUriOrNull(): URI? = runCatching { URI(this) }.getOrNull()
