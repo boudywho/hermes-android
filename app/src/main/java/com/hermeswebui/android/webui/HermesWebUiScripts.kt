@@ -528,6 +528,82 @@ object HermesWebUiScripts {
             });
           }
 
+          function hasElementNode(nodes) {
+            for (var i = 0; i < nodes.length; i++) {
+              if (nodes[i] && nodes[i].nodeType === 1) return true;
+            }
+            return false;
+          }
+
+          function hasViewportSensitiveMarker(el) {
+            if (!el || !el.getAttribute) return false;
+            if (el.getAttribute(REPAIRED_ATTR)) return true;
+
+            var role = el.getAttribute('role') || '';
+            if (role === 'dialog' || role === 'menu' || role === 'listbox') return true;
+
+            var marker = ((el.id || '') + ' ' + (el.getAttribute('class') || '')).toLowerCase();
+            return /(^|[\s_-])(clarify|dialog|modal|menu|panel|popover|popup|overlay|sheet|drawer|card|dropdown|autocomplete)([\s_-]|$)/.test(marker);
+          }
+
+          function isTransientChatOrComposerTarget(target) {
+            if (!target || target.nodeType !== 1) return false;
+
+            var origin = target;
+            var current = target;
+            var protectedViewportUi = false;
+            while (current && current.nodeType === 1) {
+              // Attribute reads and parent walking are intentionally used here instead
+              // of selector or layout APIs: this callback runs during every keystroke.
+              if (hasViewportSensitiveMarker(current)) protectedViewportUi = true;
+
+              var id = current.id || '';
+              var className = typeof current.className === 'string' ? current.className : '';
+              var isChatSurface = id === 'messages' ||
+                (' ' + className + ' ').indexOf(' messages ') !== -1 ||
+                current.getAttribute('data-testid') === 'messages';
+              if (isChatSurface) {
+                // The surface itself is structural. Descendant text/style churn is not,
+                // unless it belongs to a dialog, menu, card, or prior viewport repair.
+                return origin !== current && !protectedViewportUi;
+              }
+
+              var isComposer = id === 'composerWrap' ||
+                (' ' + className + ' ').indexOf(' composer-wrap ') !== -1;
+              if (isComposer) {
+                // Typing can churn attributes throughout the composer (for example,
+                // textarea sizing and send-button state). Keep the wrapper structural,
+                // and keep marked flyouts/panels eligible for viewport scans.
+                return origin !== current && !protectedViewportUi;
+              }
+
+              current = current.parentElement;
+            }
+            return false;
+          }
+
+          function shouldScheduleForMutation(mutation) {
+            var target = mutation.target;
+
+            // Ignore mutations made by this repair pass itself.
+            if (mutation.attributeName === REPAIRED_ATTR ||
+                (mutation.attributeName === 'style' && target.getAttribute &&
+                  target.getAttribute(REPAIRED_ATTR))) {
+              return false;
+            }
+
+            if (mutation.type === 'childList') {
+              // Element insertion/removal is structural even inside chat/composer. This
+              // keeps newly mounted dialogs and collapsed shells discoverable; only
+              // transient text-node churn on those hot surfaces can be ignored.
+              if (hasElementNode(mutation.addedNodes) || hasElementNode(mutation.removedNodes)) {
+                return true;
+              }
+            }
+
+            return !isTransientChatOrComposerTarget(target);
+          }
+
           // Expose for debugging
           window.__hermesAndroidApplyViewportFix = scanAndRepair;
 
@@ -550,12 +626,7 @@ object HermesWebUiScripts {
             // MutationObserver for DOM changes
             try {
               var observer = new MutationObserver(function(mutations) {
-                // Skip mutations that are just our own repairs
-                var dominated = mutations.every(function(m) {
-                  return m.attributeName === REPAIRED_ATTR ||
-                    (m.attributeName === 'style' && m.target.getAttribute && m.target.getAttribute(REPAIRED_ATTR));
-                });
-                if (!dominated) schedulePolyfill();
+                if (mutations.some(shouldScheduleForMutation)) schedulePolyfill();
               });
               observer.observe(document.documentElement || document.body, {
                 childList: true,

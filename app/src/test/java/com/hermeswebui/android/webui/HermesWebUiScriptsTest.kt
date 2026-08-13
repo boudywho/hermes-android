@@ -147,4 +147,66 @@ class HermesWebUiScriptsTest {
         // Settings page fix
         assertThat(script).contains(".main.showing-settings .main-view { max-height: none")
     }
+
+    @Test
+    fun `viewport observer filters all ordinary chat and composer descendant mutations without layout work`() {
+        val script = HermesWebUiScripts.viewportFixScript
+        val hotPath = script
+            .substringAfter("function isTransientChatOrComposerTarget(target)")
+            .substringBefore("function shouldScheduleForMutation(mutation)")
+
+        assertThat(hotPath).contains("current = current.parentElement")
+        assertThat(hotPath).contains("id === 'composerWrap'")
+        assertThat(hotPath).contains("indexOf(' composer-wrap ')")
+        assertThat(hotPath).contains("textarea sizing and send-button state")
+        val normalizedHotPath = hotPath.replace(Regex("\\s+"), " ")
+        assertThat(normalizedHotPath).contains("if (isComposer) {")
+        val composerBranch = normalizedHotPath
+            .substringAfter("if (isComposer) {")
+            .substringBefore("current = current.parentElement")
+        assertThat(composerBranch).contains("return origin !== current && !protectedViewportUi;")
+        assertThat(composerBranch).contains("Keep the wrapper structural")
+        assertThat(hotPath).doesNotContain("origin.id === 'msg'")
+        assertThat(hotPath).doesNotContain("isEditor")
+        assertThat(hotPath).doesNotContain("tagName")
+        assertThat(hotPath).doesNotContain("contenteditable")
+        assertThat(hotPath).doesNotContain("closest(")
+        assertThat(hotPath).doesNotContain("querySelector")
+        assertThat(hotPath).doesNotContain("getComputedStyle")
+        assertThat(hotPath).doesNotContain("getBoundingClientRect")
+    }
+
+    @Test
+    fun `viewport observer keeps composer and chat wrappers structural`() {
+        val script = HermesWebUiScripts.viewportFixScript
+        val hotPath = script
+            .substringAfter("function isTransientChatOrComposerTarget(target)")
+            .substringBefore("function shouldScheduleForMutation(mutation)")
+
+        assertThat(hotPath).contains("return origin !== current && !protectedViewportUi;")
+        assertThat(hotPath).contains("The surface itself is structural")
+        assertThat(hotPath).contains("Keep the wrapper structural")
+    }
+
+    @Test
+    fun `viewport observer retains structural and viewport scan triggers`() {
+        val script = HermesWebUiScripts.viewportFixScript
+        val mutationPolicy = script
+            .substringAfter("function shouldScheduleForMutation(mutation)")
+            .substringBefore("// Expose for debugging")
+
+        assertThat(mutationPolicy).contains("mutation.type === 'childList'")
+        assertThat(mutationPolicy).contains("hasElementNode(mutation.addedNodes)")
+        assertThat(mutationPolicy).contains("hasElementNode(mutation.removedNodes)")
+        assertThat(mutationPolicy).contains("return !isTransientChatOrComposerTarget(target)")
+        assertThat(script).contains("mutations.some(shouldScheduleForMutation)")
+        assertThat(script).contains("attributeFilter: ['style', 'class', REPAIRED_ATTR]")
+        assertThat(script).contains("window.addEventListener('resize', schedulePolyfill")
+        assertThat(script).contains("window.addEventListener('orientationchange'")
+        assertThat(script).contains("window.visualViewport.addEventListener('resize', schedulePolyfill")
+        assertThat(script).contains("role === 'dialog' || role === 'menu' || role === 'listbox'")
+        assertThat(script).contains("clarify|dialog|modal|menu|panel|popover|popup|overlay|sheet|drawer|card|dropdown|autocomplete")
+        assertThat(script).contains("if (hasViewportSensitiveMarker(current)) protectedViewportUi = true")
+        assertThat(script).contains("origin !== current && !protectedViewportUi")
+    }
 }
