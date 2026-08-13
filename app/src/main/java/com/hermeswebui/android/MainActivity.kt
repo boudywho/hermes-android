@@ -2,6 +2,7 @@ package com.hermeswebui.android
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.DownloadManager
 import android.app.AlertDialog
 import android.app.NotificationChannel
@@ -25,6 +26,7 @@ import android.os.Message
 import android.os.Parcel
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
@@ -82,6 +84,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.content.FileProvider
@@ -204,6 +207,7 @@ class MainActivity : ComponentActivity() {
     private var routeRecoveryScriptHandler: ScriptHandler? = null
     private var appSettingsEntryScriptHandler: ScriptHandler? = null
     private var enterKeyNewlineScriptHandler: ScriptHandler? = null
+    private var suppressKeyboardForDialogsScriptHandler: ScriptHandler? = null
     private var lastVpnLaunchAttemptElapsedMs: Long = 0L
     private var pendingVpnGuardUrl: String? = null
     private var vpnReconnectWaitJob: Job? = null
@@ -665,6 +669,13 @@ class MainActivity : ComponentActivity() {
         } else {
             if (isDark) HermesDarkColorScheme else HermesLightColorScheme
         }
+        val view = LocalView.current
+        if (!view.isInEditMode) {
+            SideEffect {
+                val window = (view.context as Activity).window
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isDark
+            }
+        }
         MaterialTheme(colorScheme = colorScheme) {
             val outerChromeColor = if (uiState.isSettingsVisible) {
                 MaterialTheme.colorScheme.background
@@ -862,6 +873,16 @@ class MainActivity : ComponentActivity() {
                 disableWebViewDarkening = ::disableWebViewDarkening
             )
             installHermesNotificationWebMessageBridge(this)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnTouchListener { v, event ->
+                if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_UP) {
+                    if (!v.hasFocus()) {
+                        v.requestFocus()
+                    }
+                }
+                false
+            }
             // Allow native long-press so Android's text selection handles appear in
             // conversation messages (issue #35). Default WebView behavior already
             // routes long-press on links to the system context menu.
@@ -1375,16 +1396,16 @@ class MainActivity : ComponentActivity() {
                     ).show()
                 }
                 HermesApiClient.SseCapability.FEATURE_DISABLED -> {
-                    if (disableIfUnavailable) {
-                        viewModel.setSseTransportEnabled(false)
+                    if (enableIfAvailable) {
+                        viewModel.setSseTransportEnabled(true)
                     }
                     viewModel.setSseSupportStatus(
-                        "🚫  SSE not supported on this server right now. Gateway/session SSE is off and the reconnect stream was not detected." +
-                            if (disableIfUnavailable) " SSE transport was turned off." else ""
+                        "Info: Gateway SSE extras are unavailable. Android will still try the authenticated " +
+                            "/api/session/stream for the active session; the lightweight reconnect probe was not detected."
                     )
                     Toast.makeText(
                         this@MainActivity,
-                        "Gateway/session SSE not enabled on this server — see settings for how to turn it on.",
+                        "Gateway SSE extras unavailable; session streaming remains enabled.",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -1589,6 +1610,7 @@ class MainActivity : ComponentActivity() {
     private fun applyHermesWebUiRuntimeScripts(view: WebView) {
         view.evaluateJavascript(HermesWebUiScripts.viewportFixScript, null)
         view.evaluateJavascript(HermesWebUiScripts.microphoneFallbackScript, null)
+        view.evaluateJavascript(HermesWebUiScripts.suppressKeyboardForDialogsScript, null)
         view.evaluateJavascript(buildHermesWebUiNotificationBridgeScript(), null)
         view.evaluateJavascript(buildHermesWebUiRouteRecoveryScript(), null)
         if (EnableAppSettingsSidebarShim) {
@@ -1628,6 +1650,11 @@ class MainActivity : ComponentActivity() {
             originRule,
             HermesWebUiScripts.enterKeyNewlineScript
         )
+        suppressKeyboardForDialogsScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            HermesWebUiScripts.suppressKeyboardForDialogsScript
+        )
     }
 
     private fun installHermesWebUiNativeBridges(view: WebView, serverUrl: String) {
@@ -1663,6 +1690,7 @@ class MainActivity : ComponentActivity() {
         routeRecoveryScriptHandler?.remove()
         appSettingsEntryScriptHandler?.remove()
         enterKeyNewlineScriptHandler?.remove()
+        suppressKeyboardForDialogsScriptHandler?.remove()
     }
 
     private fun addDocumentStartScript(
@@ -2325,11 +2353,13 @@ class MainActivity : ComponentActivity() {
     private fun rememberActiveOAuthPopup(popup: WebView, flow: OAuthPopupFlow) {
         activeOAuthPopup = popup
         activeOAuthFlow = flow
+        setOAuthThirdPartyCookiesEnabled(true)
         refreshActiveOAuthTimeout()
     }
 
     private fun rememberActiveMainFrameOAuth(flow: OAuthPopupFlow) {
         activeMainFrameOAuthFlow = flow
+        setOAuthThirdPartyCookiesEnabled(true)
         refreshActiveOAuthTimeout()
     }
 
@@ -2338,6 +2368,7 @@ class MainActivity : ComponentActivity() {
         viewModel.setOAuthInFlowHost(null)
         if (activeOAuthPopup == null) {
             oauthFlowTimeoutMs = 0L
+            setOAuthThirdPartyCookiesEnabled(false)
         }
     }
 
@@ -2366,7 +2397,14 @@ class MainActivity : ComponentActivity() {
         activeOAuthFlow = null
         if (activeMainFrameOAuthFlow == null) {
             oauthFlowTimeoutMs = 0L
+            setOAuthThirdPartyCookiesEnabled(false)
         }
+    }
+
+    private fun setOAuthThirdPartyCookiesEnabled(enabled: Boolean) {
+        val cookies = CookieManager.getInstance()
+        cookies.setAcceptThirdPartyCookies(webView, enabled)
+        activeOAuthPopup?.let { cookies.setAcceptThirdPartyCookies(it, enabled) }
     }
 
     private fun destroyPopup(popup: WebView) {

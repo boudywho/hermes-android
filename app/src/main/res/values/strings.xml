@@ -8,9 +8,11 @@
     <string name="blob_download_complete">Export saved to Downloads</string>
     <string name="blob_download_failed">Could not save the export</string>
     <string name="blob_download_storage_permission_required">Allow storage access, then try the export again</string>
-    <string name="reconnect_notification_title">Hermes is active</string>
-    <string name="reconnect_notification_body_activity">Hermes is active and monitoring for background activity.</string>
-    <string name="reconnect_notification_body_public_activity">Hermes is active in the background.</string>
+    <string name="reconnect_notification_title">Hermes activity is running in the background</string>
+    <string name="reconnect_notification_body_activity">Watching the current Hermes session for safe activity updates.</string>
+    <string name="reconnect_notification_body_session_stream">Live session updates are active in the background.</string>
+    <string name="reconnect_notification_body_session_stream_reconnecting">Using live session updates while Hermes reconnects.</string>
+    <string name="reconnect_notification_body_public_activity">Hermes is working in the background.</string>
     <string name="reconnect_notification_body_public_reconnecting">Hermes is trying to reconnect in the background.</string>
     <string name="reconnect_notification_exit_action">Exit</string>
     <string name="background_activity_channel_name">Hermes background activity</string>
@@ -35,6 +37,6 @@
     <string name="settings_background_activity_title">Background activity monitoring</string>
     <string name="settings_background_activity_description">Keep Hermes session monitoring active with an ongoing notification, including while this app is backgrounded.</string>
     <string name="settings_background_activity_battery_note">Android system controls or device battery optimization may still delay or stop background updates. Hermes does not start at boot and respects system controls.</string>
-    <string name="settings_sse_transport_description">Beta: uses Hermes SSE endpoints for foreground reconnect detection and falls back to polling.</string>
-    <string name="settings_sse_transport_note">This beta reconnect option is separate from Background activity monitoring, which attempts the authenticated current-session stream automatically when available.</string>
+    <string name="settings_sse_transport_description">Uses the persistent authenticated session stream for background activity updates, with reconnect polling as a fallback.</string>
+    <string name="settings_sse_transport_note">Android uses /api/session/stream for the active authenticated session, the same persistent stream used by Hermes WebUI. The optional gateway check reports approval and notification extras; it does not disable session streaming by itself.</string>
 </resources>

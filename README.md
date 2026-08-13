@@ -130,7 +130,7 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 - File uploads and public Downloads integration, including direct camera capture and trusted `blob:` export streaming; explicit WebUI filenames are preserved after safe path sanitization
 - Share-to-app intake for text and files
 - Android-backed browser notifications for Hermes WebUI alerts
-- Optional ongoing background monitoring with a passive foreground-service notification and trusted session activity updates when available
+- Optional ongoing background monitoring with a passive foreground-service notification, persistent authenticated session-stream updates (`/api/session/stream`), and reconnect polling fallback when live streaming is unavailable
 - Optional debug-log capture with persistent foreground notification and one-tap stop action
 - Channel-aware app updates: Play uses in-app update flow, GitHub APK builds download and hand off to installer in-app
 - GitHub APK updates surface a stateful in-app action flow (`Check` -> `Download` -> `Install`) and still show an install-ready notification when Hermes is backgrounded

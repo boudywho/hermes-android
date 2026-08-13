@@ -3,6 +3,7 @@ package com.hermeswebui.android.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.URI
@@ -77,28 +78,39 @@ object HermesApiClient {
 
     /**
      * Describes the SSE capability level detected on the server.
+     *
+     * STRATEGY: The Android app maintains a fallback chain for session updates:
+     * 1. Primary: `/api/session/stream` (persistent SSE across agent turns, same as WebUI uses)
+     * 2. Fallback: lightweight polling when SSE is unavailable
+     *
+     * The gateway/session SSE probe only reports whether the server has explicitly enabled
+     * "agent sessions" mode; the persistent `/api/session/stream` endpoint may be available
+     * regardless of this flag. This capability enum classifies the probe response, not whether
+     * session streaming itself is functional.
      */
-    enum class SseCapability {
+    enum class SseCapability(val keepsSessionTransportEnabled: Boolean) {
         /** The WebUI gateway/session SSE probe reports the feature enabled and healthy. */
-        SESSION_SSE_ENABLED,
+        SESSION_SSE_ENABLED(true),
         /** The lightweight reconnect SSE stream is available, even if gateway/session SSE is not. */
-        RECONNECT_STREAM_AVAILABLE,
+        RECONNECT_STREAM_AVAILABLE(true),
         /**
          * The probe reported the gateway/session SSE feature disabled on this server.
          * This is the common "agent sessions not enabled" case and should be
-         * presented with a clear server-settings message rather than a generic error.
+         * presented as unavailable gateway extras rather than a generic transport failure.
+         * The persistent `/api/session/stream` endpoint may still be functional, so preserve the
+         * user's session-stream transport preference and let its authenticated connection decide.
          */
-        FEATURE_DISABLED,
+        FEATURE_DISABLED(true),
         /** No SSE capability detected (network error or unexpected server response). */
-        NONE
+        NONE(false)
     }
 
     /** The prompt text a user can paste into Hermes chat to ask it to enable session SSE. */
     const val SSE_ENABLE_HERMES_PROMPT =
-        "Please enable Hermes WebUI agent sessions / gateway SSE on this server. " +
-        "Turn on the server setting that exposes /api/sessions/gateway/stream " +
-        "(the probe currently reports 'agent sessions not enabled'), then restart Hermes if needed. " +
-        "After that, re-run the Android app's SSE support check."
+        "Please enable Hermes WebUI agent sessions on this server. " +
+        "Enable the server setting that exposes gateway/session SSE (currently reports 'agent sessions not enabled'), " +
+        "restart Hermes if needed, then re-run the Android app's SSE support check. " +
+        "(Note: the app uses /api/session/stream for persistent session updates; this setting affects the gateway probe response and advanced approval features.)"
 
     internal data class GatewayProbeResult(
         val httpStatus: Int,
@@ -200,43 +212,20 @@ object HermesApiClient {
                 )
             )
         } catch (exception: Exception) {
-            val baseResult = when {
-                exception is UnknownHostException -> {
-                    ServerReadinessResult(
-                        isReady = false,
-                        message = "Could not find that host. Check the server name and try again.",
-                        status = ServerReadinessStatus.UNREACHABLE
-                    )
-                }
-                exception is ConnectException -> {
-                    ServerReadinessResult(
-                        isReady = false,
-                        message = "Could not connect to this server. Check that Hermes is running and reachable from Android.",
-                        status = ServerReadinessStatus.UNREACHABLE
-                    )
-                }
-                exception is SocketTimeoutException -> {
-                    ServerReadinessResult(
-                        isReady = false,
-                        message = "The server took too long to respond. Check that Hermes finished starting up and try again.",
-                        status = ServerReadinessStatus.UNREACHABLE
-                    )
-                }
-                exception is SSLHandshakeException || exception is SSLProtocolException || exception is SSLException || exception.message.orEmpty().contains("ssl", ignoreCase = true) -> {
-                    ServerReadinessResult(
-                        isReady = false,
-                        message = "Could not connect securely. Check whether this Hermes server should use http:// instead of https://.",
-                        status = ServerReadinessStatus.UNREACHABLE
-                    )
-                }
-                else -> {
-                    ServerReadinessResult(
-                        isReady = false,
-                        message = "Could not reach this Hermes server. Check the URL, scheme, and whether the server is online.",
-                        status = ServerReadinessStatus.UNREACHABLE
-                    )
-                }
+            val rootFallback = probeHermesRootPage(baseUrl)
+            if (rootFallback != null) {
+                return@withContext rootFallback.copy(
+                    diagnostics = buildString {
+                        appendLine("Probed: $probedUrl")
+                        appendLine("Exception: ${exception::class.java.simpleName}")
+                        val msg = exception.message?.take(300)
+                        if (!msg.isNullOrBlank()) appendLine("Message: $msg")
+                        appendLine("Fallback: Root page fingerprint matched Hermes WebUI.")
+                    }.trim()
+                )
             }
+
+            val baseResult = buildUnreachableResult(baseUrl, exception)
             baseResult.copy(
                 diagnostics = buildString {
                     appendLine("Probed: $probedUrl")
@@ -245,6 +234,61 @@ object HermesApiClient {
                     if (!msg.isNullOrBlank()) appendLine("Message: $msg")
                 }.trim()
             )
+        }
+    }
+
+    internal fun buildUnreachableResult(baseUrl: String, exception: Exception): ServerReadinessResult {
+        val normalizedHost = runCatching {
+            URI(baseUrl.trim()).host?.trim().orEmpty().removePrefix("[").removeSuffix("]").lowercase()
+        }.getOrDefault("")
+        val isLoopbackHost = normalizedHost == "localhost" || runCatching {
+            normalizedHost.isNotBlank() && InetAddress.getByName(normalizedHost).isLoopbackAddress
+        }.getOrDefault(false)
+
+        if (isLoopbackHost) {
+            return ServerReadinessResult(
+                isReady = false,
+                message = "This URL points to your Android device itself. Use your Hermes server's LAN hostname or IP instead of localhost/127.0.0.1.",
+                status = ServerReadinessStatus.UNREACHABLE
+            )
+        }
+
+        return when {
+            exception is UnknownHostException -> {
+                ServerReadinessResult(
+                    isReady = false,
+                    message = "Could not find that host. Check the server name and try again.",
+                    status = ServerReadinessStatus.UNREACHABLE
+                )
+            }
+            exception is ConnectException -> {
+                ServerReadinessResult(
+                    isReady = false,
+                    message = "Could not connect to this server. Check that Hermes is running and reachable from Android.",
+                    status = ServerReadinessStatus.UNREACHABLE
+                )
+            }
+            exception is SocketTimeoutException -> {
+                ServerReadinessResult(
+                    isReady = false,
+                    message = "The server took too long to respond. Check that Hermes finished starting up and try again.",
+                    status = ServerReadinessStatus.UNREACHABLE
+                )
+            }
+            exception is SSLHandshakeException || exception is SSLProtocolException || exception is SSLException || exception.message.orEmpty().contains("ssl", ignoreCase = true) -> {
+                ServerReadinessResult(
+                    isReady = false,
+                    message = "Could not connect securely. Check whether this Hermes server should use http:// instead of https://.",
+                    status = ServerReadinessStatus.UNREACHABLE
+                )
+            }
+            else -> {
+                ServerReadinessResult(
+                    isReady = false,
+                    message = "Could not reach this Hermes server. Check the URL, scheme, and whether the server is online.",
+                    status = ServerReadinessStatus.UNREACHABLE
+                )
+            }
         }
     }
 

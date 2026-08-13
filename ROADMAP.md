@@ -3,7 +3,7 @@
 > Maintenance-focused Android wrapper for Hermes Web UI. The core wrapper is
 > good as-is; product UI and workflow changes belong in Hermes WebUI.
 >
-> Last updated: 2026-07-30
+> Last updated: 2026-08-09
 
 ---
 
@@ -128,6 +128,7 @@ sketches are captured inline below.
 
 | ID | Date | Area | Summary |
 |---|---|---|---|
+| SSE-001 | 2026-08-09 | Background continuity | Clarified the native SSE settings and notification status: Android keeps its persistent authenticated `/api/session/stream` preference when optional gateway extras are unavailable, presents that distinction clearly, and logs the safe active transport state for diagnostics. |
 | A-001 | 2026-06-19 | Build | Fixed Java/Gradle setup and verified `test` plus `assembleDebug` |
 | A-002 | 2026-06-19 | Security | Added URL policy validation and tests |
 | A-003 | 2026-06-19 | Tooling | Aligned AGP/Gradle to avoid Gradle 10 deprecation pressure |
@@ -231,5 +232,9 @@ sketches are captured inline below.
 | BUG-035 | 2026-07-25 | Connectivity | Fixed Tailscale recovery: Hermes now asks Tailscale to connect while remaining visible, retries the pending server load automatically, and only opens Tailscale/VPN settings after a 10-second auto-connect grace period. It dismisses Settings and reloads Hermes once VPN plus server are ready, posts a ready notification when the fallback app remains foregrounded, and routes pull-to-refresh, Retry, reconnect events, and current-server taps through the VPN-aware loader. |
 | BUG-036 | 2026-07-28 | Android compatibility | Fixed approval gates and quoted approval context repeatedly expanding and collapsing in Android WebView by retaining generic viewport repairs while the affected panel remains visible; the repair now refreshes on viewport changes and releases only after the panel is hidden. |
 | MILESTONE-037 | 2026-07-30 | Android integration | Added exact-origin blob export streaming, live WebUI theme chrome, bounded trusted WebView state restoration, durable opt-in passive background monitoring with session-stream retries, and hardened CI/release verification with pinned actions, signer checks, checksums, and immutable release behavior. |
-| BUG-038 | 2026-07-30 | Lifecycle / Theme | Made the user-enabled remote-session monitor continuous across app foreground/background transitions, classified it as special use on Android 14+ with an older data-sync fallback, and made authenticated WebUI theme changes repaint the edge-to-edge system-bar backing through scoped root/head observation. |
+| LIFECYCLE-038 | 2026-07-30 | Lifecycle / Theme | Made the user-enabled remote-session monitor continuous across app foreground/background transitions, classified it as special use on Android 14+ with an older data-sync fallback, and made authenticated WebUI theme changes repaint the edge-to-edge system-bar backing through scoped root/head observation. |
 | REL-027 | 2026-08-01 | Release | Added a stable GitHub APK-only release workflow that builds and publishes the signed `github` variant without requiring Google Play credentials. |
+| BUG-037 | 2026-08-01 | Authentication | Fixed Issue 54 PocketID SSO usability: enabled AndroidX WebKit `WEB_AUTHENTICATION_SUPPORT_FOR_APP` on main/popup WebViews for passkeys, improved touch-to-focus handling so keyboard input reliably opens on code-entry forms, and temporarily enables third-party cookies only while an OAuth flow is active to preserve federated sign-in compatibility without broadening baseline cookie policy. |
+| BUG-038 | 2026-08-01 | UI | Fixed Issue 55 light-theme system bar contrast by applying theme-aware status bar icon appearance at runtime (dark icons in light mode, light icons in dark mode), so Android status bar text/icons remain readable over the WebView shell background. |
+| BUG-039 | 2026-08-09 | Settings / Connectivity | Fixed Issue 61 false "UNREACHABLE" classification by hardening server readiness probing: when `/api/status` fails with a transport exception, Android now probes the root page and accepts Hermes fingerprint matches as reachable before failing closed. Also improved loopback diagnostics so `localhost`/`127.0.0.1` clearly explain that they target the Android device itself and should be replaced with a LAN host/IP. |
+| BUG-040 | 2026-08-09 | WebView | Fixed Issue 59 blank main-pane text regression by refining the Android viewport polyfill chat-surface guard: the script now keeps descendant chat nodes excluded (to avoid per-message style churn) but allows the top-level `.messages` container itself to be repaired when collapsed by the WebView vh/dvh bug. This restores visible conversation content while retaining anti-flicker behavior. |

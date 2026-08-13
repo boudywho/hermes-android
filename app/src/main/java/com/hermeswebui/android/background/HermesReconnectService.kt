@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import android.webkit.CookieManager
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
@@ -108,10 +109,16 @@ class HermesReconnectService : Service() {
         activeShowFullTextOnLockScreen = showFullTextOnLockScreen
 
         ensureBackgroundActivityChannel()
+        val sessionStreamEnabled = !serverUrl.isNullOrBlank() && !sessionId.isNullOrBlank()
+        Log.i(
+            TAG,
+            "Background session monitor started: reconnecting=$isReconnecting, sessionStreamEnabled=$sessionStreamEnabled, hasSession=${!sessionId.isNullOrBlank()}"
+        )
+
         val notification = buildNotification(
             pollIntervalSeconds = pollIntervalSeconds,
             contentText = currentNotificationBody.ifBlank {
-                defaultNotificationBody(pollIntervalSeconds, isReconnecting)
+                defaultNotificationBody(pollIntervalSeconds, isReconnecting, sessionStreamEnabled)
             },
             targetUrl = currentNotificationTargetUrl ?: sessionTargetUrl,
             showFullTextOnLockScreen = showFullTextOnLockScreen,
@@ -358,9 +365,20 @@ class HermesReconnectService : Service() {
         }
     }
 
-    private fun defaultNotificationBody(pollIntervalSeconds: Int, isReconnecting: Boolean): String {
+    private fun defaultNotificationBody(
+        pollIntervalSeconds: Int,
+        isReconnecting: Boolean,
+        sseTransportEnabled: Boolean
+    ): String {
         if (!isReconnecting) {
-            return getString(R.string.reconnect_notification_body_activity)
+            return if (sseTransportEnabled) {
+                getString(R.string.reconnect_notification_body_session_stream)
+            } else {
+                getString(R.string.reconnect_notification_body_activity)
+            }
+        }
+        if (sseTransportEnabled) {
+            return getString(R.string.reconnect_notification_body_session_stream_reconnecting)
         }
         val normalizedInterval = pollIntervalSeconds.coerceAtLeast(1)
         return resources.getQuantityString(
@@ -528,6 +546,7 @@ class HermesReconnectService : Service() {
         val encodedSessionId = runCatching {
             URLEncoder.encode(sessionId, Charsets.UTF_8.name())
         }.getOrNull() ?: return StreamResult.UNAVAILABLE
+        // This persistent endpoint is also used by Hermes WebUI for durable session-scoped events.
         val url = runCatching {
             URI(baseUrl.trimEnd('/'))
                 .resolve("/api/session/stream?session_id=$encodedSessionId")
@@ -733,6 +752,7 @@ class HermesReconnectService : Service() {
         private const val MAX_RESPONDED_APPROVAL_HISTORY = 64
         private const val ACTION_OPEN_NOTIFICATION_URL = "com.hermeswebui.android.OPEN_NOTIFICATION_URL"
         private const val EXTRA_NOTIFICATION_URL = "com.hermeswebui.android.extra.NOTIFICATION_URL"
+        private const val TAG = "HermesReconnectService"
 
         fun start(
             context: Context,

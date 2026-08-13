@@ -881,11 +881,10 @@ fun SettingsScreen(
                                 }
                             }
                             if (!sseSupportStatus.isNullOrBlank()) {
-                                val isFeatureDisabled = sseSupportStatus.startsWith("🚫")
                                 val statusColor = when {
                                     sseSupportStatus.startsWith("✅") -> Color(0xFF4CAF50)
+                                    sseSupportStatus.startsWith("Info:") -> onSurfaceVar.copy(alpha = 0.9f)
                                     sseSupportStatus.startsWith("❔") -> onSurfaceVar.copy(alpha = 0.82f)
-                                    isFeatureDisabled -> MaterialTheme.colorScheme.error
                                     sseSupportStatus.startsWith("❌") -> MaterialTheme.colorScheme.error
                                     else -> onSurfaceVar.copy(alpha = 0.72f)
                                 }
@@ -894,27 +893,6 @@ fun SettingsScreen(
                                     color = statusColor,
                                     style = MaterialTheme.typography.labelSmall
                                 )
-                                if (isFeatureDisabled) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    OutlinedButton(
-                                        onClick = onCopySsePrompt,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
-                                        )
-                                    ) {
-                                        Text(
-                                            "📋  Copy enable-SSE prompt for Hermes",
-                                            color = MaterialTheme.colorScheme.error,
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                    Text(
-                                        text = "Paste this into the Hermes chat to ask it to set the flag and restart.",
-                                        color = onSurfaceVar.copy(alpha = 0.65f),
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                }
                             }
                         }
                     }
