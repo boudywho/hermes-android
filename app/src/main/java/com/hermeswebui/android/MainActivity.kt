@@ -1012,7 +1012,6 @@ class MainActivity : ComponentActivity() {
                 val target = request?.url?.toString() ?: return true
                 return handlePopupNavigation(
                     popup = popup,
-                    sourceView = view,
                     target = target
                 )
             }
@@ -1032,7 +1031,6 @@ class MainActivity : ComponentActivity() {
 
     private fun handlePopupNavigation(
         popup: WebView,
-        sourceView: WebView?,
         target: String
     ): Boolean {
         if (handleAppSettingsNavigation(target)) {
@@ -1050,8 +1048,10 @@ class MainActivity : ComponentActivity() {
 
         val flow = parseTrustedOAuthStart(target)
         if (flow != null) {
-            rememberActiveOAuthPopup(popup, flow)
-            sourceView?.loadUrl(target)
+            // Move popup OAuth flows to the main frame so they are visible and interactive.
+            rememberActiveMainFrameOAuth(flow)
+            webView.loadUrl(target)
+            destroyPopup(popup)
             return true
         }
 
@@ -1077,7 +1077,10 @@ class MainActivity : ComponentActivity() {
 
         val startedFlow = parseTrustedOAuthStart(url)
         if (startedFlow != null) {
-            rememberActiveOAuthPopup(popup, startedFlow)
+            // Move popup OAuth flows to the main frame so they are visible and interactive.
+            rememberActiveMainFrameOAuth(startedFlow)
+            webView.loadUrl(url)
+            destroyPopup(popup)
             return
         }
 
@@ -2102,13 +2105,6 @@ class MainActivity : ComponentActivity() {
                 { it.packageName.lowercase() }
             )
         )
-    }
-
-    private fun rememberActiveOAuthPopup(popup: WebView, flow: OAuthPopupFlow) {
-        activeOAuthPopup = popup
-        activeOAuthFlow = flow
-        setOAuthThirdPartyCookiesEnabled(true)
-        refreshActiveOAuthTimeout()
     }
 
     private fun rememberActiveMainFrameOAuth(flow: OAuthPopupFlow) {

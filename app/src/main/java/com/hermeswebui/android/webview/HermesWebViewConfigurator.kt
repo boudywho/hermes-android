@@ -22,7 +22,7 @@ object HermesWebViewConfigurator {
             allowContentAccess = false
             loadsImagesAutomatically = true
             mediaPlaybackRequiresUserGesture = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
             userAgentString = "${userAgentString} Hermes-Android/$appVersionName"
@@ -52,7 +52,7 @@ object HermesWebViewConfigurator {
             allowContentAccess = false
             loadsImagesAutomatically = true
             mediaPlaybackRequiresUserGesture = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             setSupportMultipleWindows(true)
             disableWebViewDarkening(this)
             if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
