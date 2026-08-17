@@ -75,6 +75,11 @@ class HermesDebugLoggingService : Service() {
         }
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        HermesTaskRemovalShutdown.run(this)
+    }
+
     private fun stopForAppExitInternal() {
         stopLogCapture()
         stopForeground(STOP_FOREGROUND_REMOVE)

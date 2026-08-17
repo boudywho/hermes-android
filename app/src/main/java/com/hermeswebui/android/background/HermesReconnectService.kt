@@ -63,6 +63,13 @@ class HermesReconnectService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        synchronized(instanceLock) {
+            activeInstance = this
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_EXIT) {
             handleExit(startId)
@@ -156,10 +163,21 @@ class HermesReconnectService : Service() {
     }
 
     override fun onDestroy() {
-        cancelSessionStream()
-        serviceScope.cancel()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        super.onDestroy()
+        try {
+            cancelSessionStream()
+            serviceScope.cancel()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } finally {
+            synchronized(instanceLock) {
+                if (activeInstance === this) activeInstance = null
+            }
+            super.onDestroy()
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        HermesTaskRemovalShutdown.run(this)
     }
 
     @RequiresApi(35)
@@ -271,6 +289,14 @@ class HermesReconnectService : Service() {
         runCatching { HermesDebugLoggingService.stopForAppExit() }
         runCatching { HermesDebugLoggingService.stop(applicationContext) }
         android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
+    private fun stopForAppExitInternal() {
+        cancelSessionStream()
+        serviceScope.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        NotificationManagerCompat.from(this).cancel(RECONNECT_NOTIFICATION_ID)
+        stopSelf()
     }
 
     private fun ensureBackgroundActivityChannel() {
@@ -753,6 +779,10 @@ class HermesReconnectService : Service() {
         private const val ACTION_OPEN_NOTIFICATION_URL = "com.hermeswebui.android.OPEN_NOTIFICATION_URL"
         private const val EXTRA_NOTIFICATION_URL = "com.hermeswebui.android.extra.NOTIFICATION_URL"
         private const val TAG = "HermesReconnectService"
+        private val instanceLock = Any()
+
+        @Volatile
+        private var activeInstance: HermesReconnectService? = null
 
         fun start(
             context: Context,
@@ -778,6 +808,10 @@ class HermesReconnectService : Service() {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, HermesReconnectService::class.java))
+        }
+
+        internal fun stopForAppExit() {
+            synchronized(instanceLock) { activeInstance }?.stopForAppExitInternal()
         }
     }
 

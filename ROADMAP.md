@@ -128,6 +128,7 @@ sketches are captured inline below.
 
 | ID | Date | Area | Summary |
 |---|---|---|---|
+| BUG-047 | 2026-08-17 | Lifecycle | Removing Hermes from Android Recents now synchronously latches sticky monitor recovery off, stops reconnect and debug foreground work, clears package notifications, and terminates the app process without affecting ordinary background monitoring. |
 | SSE-001 | 2026-08-09 | Background continuity | Clarified the native SSE settings and notification status: Android keeps its persistent authenticated `/api/session/stream` preference when optional gateway extras are unavailable, presents that distinction clearly, and logs the safe active transport state for diagnostics. |
 | A-001 | 2026-06-19 | Build | Fixed Java/Gradle setup and verified `test` plus `assembleDebug` |
 | A-002 | 2026-06-19 | Security | Added URL policy validation and tests |

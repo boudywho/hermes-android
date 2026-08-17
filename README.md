@@ -130,7 +130,7 @@ If a change belongs to Hermes everywhere, it belongs in WebUI first.
 - File uploads and public Downloads integration, including direct camera capture and trusted `blob:` export streaming; explicit WebUI filenames are preserved after safe path sanitization
 - Share-to-app intake for text and files
 - Android-backed browser notifications for Hermes WebUI alerts
-- Optional ongoing background monitoring with a passive foreground-service notification, persistent authenticated session-stream updates (`/api/session/stream`), and reconnect polling fallback when live streaming is unavailable
+- Optional ongoing background monitoring with a passive foreground-service notification, persistent authenticated session-stream updates (`/api/session/stream`), and reconnect polling fallback when live streaming is unavailable; removing Hermes from Android Recents stops its services and notifications
 - Optional debug-log capture with persistent foreground notification and one-tap stop action
 - Channel-aware app updates: Play uses in-app update flow, GitHub APK builds download and hand off to installer in-app
 - GitHub APK updates surface a stateful in-app action flow (`Check` -> `Download` -> `Install`) and still show an install-ready notification when Hermes is backgrounded
@@ -164,8 +164,8 @@ Hermes-Android currently publishes through two release channels:
 
 Current checked-in release metadata:
 
-- Version name: `1.0.21`
-- Version code: `10021`
+- Version name: `1.0.22`
+- Version code: `10022`
 - Play application ID: `com.hermeswebui.android`
 - GitHub application ID: `com.hermeswebui.android.github`
 - Compile SDK / target SDK: `37`
@@ -257,10 +257,11 @@ and server switching take precedence.
 Background activity monitoring is opt-in. While enabled, Android starts its
 low-priority ongoing foreground-service notification while Hermes is visible
 and retains the same monitor across foreground/background transitions, even
-when no session stream is available. It stops only when the setting is disabled
-or when the notification's Exit action is pressed. Exit removes the app's tasks
-and suppresses background restart until Hermes is explicitly opened again;
-the enabled preference is preserved. The monitor never starts at boot. Android
+when no session stream is available. It stops when the setting is disabled,
+the notification's Exit action is pressed, or the Hermes task is removed from
+Android Recents. Exit and task removal suppress background restart until Hermes
+is explicitly opened again; the enabled preference is preserved. The monitor
+never starts at boot. Android
 14+ classifies this persistent, user-visible
 remote session monitor as special use; older supported versions retain the
 data-sync fallback. OEM battery optimization can still affect background work.
