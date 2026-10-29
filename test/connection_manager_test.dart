@@ -2364,6 +2364,42 @@ void main() {
       );
     });
 
+    test('accepts and transmits the literal max reasoning effort', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final requests = <Map<String, dynamic>>[];
+      final socketSubscription = server.transform(WebSocketTransformer()).listen((socket) {
+        socket.listen((raw) {
+          final request = jsonDecode(raw as String) as Map<String, dynamic>;
+          requests.add(request);
+          socket.add(jsonEncode({
+            'jsonrpc': '2.0',
+            'id': request['id'],
+            'result': {'updated': true, 'value': 'max'},
+          }));
+        });
+      });
+      final client = WsClient('http://127.0.0.1:${server.port}');
+
+      try {
+        await client.connect();
+        await client.setSessionReasoning(
+          sessionId: 'runtime-123',
+          effort: 'max',
+        );
+
+        expect(requests.single['method'], 'config.set');
+        expect(requests.single['params'], {
+          'session_id': 'runtime-123',
+          'key': 'reasoning',
+          'value': 'max',
+        });
+      } finally {
+        client.close();
+        await socketSubscription.cancel();
+        await server.close(force: true);
+      }
+    });
+
     test('reads and writes session-scoped reasoning effort', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final requests = <Map<String, dynamic>>[];

@@ -68,7 +68,8 @@ class _ModelSelection {
   const _ModelSelection({required this.choice, required this.reasoningEffort});
 }
 
-const _reasoningEffortLabels = <String, String>{
+@visibleForTesting
+const reasoningEffortLabels = <String, String>{
   'none': 'Off (no thinking)',
   'minimal': 'Minimal',
   'low': 'Low',
@@ -1378,7 +1379,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         child: DropdownButton<String>(
                           isExpanded: true,
                           value: selectedEffort,
-                          items: _reasoningEffortLabels.entries
+                          items: reasoningEffortLabels.entries
                               .map(
                                 (entry) => DropdownMenuItem(
                                   value: entry.key,
@@ -1531,7 +1532,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${choice.model} • ${_reasoningEffortLabels[selection.reasoningEffort]} '
+            '${choice.model} • ${reasoningEffortLabels[selection.reasoningEffort]} '
             'now apply only to this chat.',
           ),
         ),
